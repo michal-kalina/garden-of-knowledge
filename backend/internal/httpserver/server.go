@@ -9,20 +9,28 @@ import (
 	"time"
 )
 
-// New builds the API router. For now, only health checks;
-// document and chat endpoints will be added in Phase 1 and 2.
-func New(db *sql.DB, logger *slog.Logger) http.Handler {
+type server struct {
+	db             *sql.DB
+	docs           DocumentService
+	logger         *slog.Logger
+	maxUploadBytes int64
+}
+
+// New builds the API router.
+func New(db *sql.DB, docs DocumentService, maxUploadBytes int64, logger *slog.Logger) http.Handler {
+	s := &server{db: db, docs: docs, logger: logger, maxUploadBytes: maxUploadBytes}
+
 	mux := http.NewServeMux()
 
-	// Liveness: process is alive. Does not check dependencies.
+	// Liveness: the process is up. Checks no dependencies.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	// Readiness: service is ready to handle traffic (database reachable).
-	// Separation of liveness/readiness is important under Kubernetes (Phase 5).
+	// Readiness: the service can take traffic (database reachable).
+	// The liveness/readiness split matters under Kubernetes (Phase 5).
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		if err := db.PingContext(r.Context()); err != nil {
+		if err := s.db.PingContext(r.Context()); err != nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 				"status": "unavailable", "reason": "database unreachable",
 			})
@@ -30,6 +38,10 @@ func New(db *sql.DB, logger *slog.Logger) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
+
+	mux.HandleFunc("POST /documents", s.handleDocumentUpload)
+	mux.HandleFunc("GET /documents", s.handleDocumentList)
+	mux.HandleFunc("GET /documents/{id}", s.handleDocumentGet)
 
 	return logging(logger)(mux)
 }
@@ -40,7 +52,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// logging is a simple middleware for logging HTTP requests in a structured format.
+// logging is a minimal structured access-log middleware.
 func logging(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

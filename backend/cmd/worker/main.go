@@ -1,8 +1,9 @@
-// Command worker processes tasks from the ingestion queue in PostgreSQL.
+// Command worker processes ingestion jobs from the Postgres-backed queue.
 //
-// Phase 0: skeleton — worker picks up a task via SELECT ... FOR UPDATE SKIP LOCKED
-// and marks it as done. The actual pipeline (file download from MinIO,
-// parsing by Python service, chunking, embeddings) will be added in Phase 1.
+// Phase 1 step 1: the worker picks a job via SELECT ... FOR UPDATE SKIP LOCKED
+// and completes it, moving the document to 'ready' so the status flow is
+// observable end-to-end. The real pipeline (fetch file from MinIO, parse via
+// the Python service, chunk, embed) lands in the next steps of Phase 1.
 package main
 
 import (
@@ -59,14 +60,14 @@ func run(logger *slog.Logger) error {
 	}
 }
 
-// processOne takes a single task from the queue and processes it.
-// SKIP LOCKED ensures that multiple worker instances will not pick up the same task.
+// processOne claims a single queued job and processes it. SKIP LOCKED ensures
+// multiple worker instances never claim the same job.
 func processOne(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback() //nolint:errcheck // rollback after commit is no-open
+	defer tx.Rollback() //nolint:errcheck // rollback after commit is a no-op
 
 	var jobID int64
 	var documentID string
@@ -79,7 +80,7 @@ func processOne(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 		LIMIT 1
 	`).Scan(&jobID, &documentID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil // empty queue — this is a normal state
+		return nil // empty queue is the normal idle state
 	}
 	if err != nil {
 		return err
@@ -87,14 +88,23 @@ func processOne(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 
 	logger.Info("picked job", "job_id", jobID, "document_id", documentID)
 
-	// TODO(Phase 1): fetch file from MinIO, call parser, chunking, embeddings,
-	// save chunks and set documents.status = 'ready'.
-	// For now we mark the job as done to practice the queue mechanism.
+	// TODO(phase-1): fetch the file from MinIO, call the parser, chunk,
+	// embed, store chunks — then split this into claim -> work -> finalize
+	// with retry accounting. For now the job completes immediately so the
+	// pending -> ready status transition is visible in the API.
 	_, err = tx.ExecContext(ctx, `
 		UPDATE ingestion_jobs
 		SET status = 'done', attempts = attempts + 1, updated_at = now()
 		WHERE id = $1
 	`, jobID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE documents
+		SET status = 'ready', updated_at = now()
+		WHERE id = $1
+	`, documentID)
 	if err != nil {
 		return err
 	}

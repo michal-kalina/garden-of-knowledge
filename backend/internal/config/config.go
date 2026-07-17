@@ -1,24 +1,36 @@
-// Package config reads application configuration from environment variables.
+// Package config loads application configuration from environment variables.
 //
-// Intentionally not using a library (viper etc.) — at this stage a few
-// environment variables don't justify an additional dependency.
+// Deliberately no config library (viper etc.) — a handful of env vars does
+// not justify the dependency.
 package config
 
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 )
 
 type Config struct {
-	// DatabaseURL is the Data Source Name for the PostgreSQL database, e.g., postgres://user:pass@host:5432/db?sslmode=disable
+	// DatabaseURL is the Postgres DSN, e.g. postgres://user:pass@host:5432/db?sslmode=disable
 	DatabaseURL string
-	// HTTPAddr is the address to listen on for the API, e.g., ":8080".
+	// HTTPAddr is the API listen address, e.g. ":8080".
 	HTTPAddr string
-	// ParserURL is the base URL for the document parsing service (Python).
+	// ParserURL is the base URL of the document parsing service (Python).
 	ParserURL string
-	// WorkerPollInterval is the interval at which the worker checks the task queue.
+	// WorkerPollInterval controls how often the worker polls the job queue.
 	WorkerPollInterval time.Duration
+
+	// S3Endpoint is the object storage endpoint as host:port, without scheme
+	// (the scheme is chosen by S3UseSSL, as the MinIO SDK expects).
+	S3Endpoint  string
+	S3AccessKey string
+	S3SecretKey string
+	S3Bucket    string
+	S3UseSSL    bool
+
+	// MaxUploadBytes caps the size of a single document upload.
+	MaxUploadBytes int64
 }
 
 func Load() (Config, error) {
@@ -27,6 +39,13 @@ func Load() (Config, error) {
 		HTTPAddr:           getenvDefault("HTTP_ADDR", ":8080"),
 		ParserURL:          getenvDefault("PARSER_URL", "http://localhost:8000"),
 		WorkerPollInterval: 2 * time.Second,
+		S3Endpoint:         getenvDefault("S3_ENDPOINT", "localhost:9000"),
+		// Defaults match docker-compose dev credentials; production overrides
+		// them via env (secret management arrives with Phase 5 deployment).
+		S3AccessKey:    getenvDefault("S3_ACCESS_KEY", "gok"),
+		S3SecretKey:    getenvDefault("S3_SECRET_KEY", "gok_dev_password"),
+		S3Bucket:       getenvDefault("S3_BUCKET", "documents"),
+		MaxUploadBytes: 50 << 20, // 50 MiB
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL is required")
@@ -37,6 +56,20 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("invalid WORKER_POLL_INTERVAL %q: %w", v, err)
 		}
 		cfg.WorkerPollInterval = d
+	}
+	if v := os.Getenv("S3_USE_SSL"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid S3_USE_SSL %q: %w", v, err)
+		}
+		cfg.S3UseSSL = b
+	}
+	if v := os.Getenv("MAX_UPLOAD_BYTES"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf("invalid MAX_UPLOAD_BYTES %q", v)
+		}
+		cfg.MaxUploadBytes = n
 	}
 	return cfg, nil
 }

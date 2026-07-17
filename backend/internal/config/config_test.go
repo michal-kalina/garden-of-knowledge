@@ -26,6 +26,12 @@ func TestLoad(t *testing.T) {
 		if cfg.WorkerPollInterval != 2*time.Second {
 			t.Errorf("WorkerPollInterval = %v, want 2s", cfg.WorkerPollInterval)
 		}
+		if cfg.S3Bucket != "documents" {
+			t.Errorf("S3Bucket = %q, want documents", cfg.S3Bucket)
+		}
+		if cfg.MaxUploadBytes != 50<<20 {
+			t.Errorf("MaxUploadBytes = %d, want %d", cfg.MaxUploadBytes, 50<<20)
+		}
 	})
 
 	t.Run("parses poll interval", func(t *testing.T) {
@@ -45,6 +51,30 @@ func TestLoad(t *testing.T) {
 		t.Setenv("WORKER_POLL_INTERVAL", "banana")
 		if _, err := Load(); err == nil {
 			t.Fatal("expected error for invalid duration")
+		}
+	})
+
+	t.Run("parses S3 and upload settings", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("S3_USE_SSL", "true")
+		t.Setenv("MAX_UPLOAD_BYTES", "1024")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !cfg.S3UseSSL {
+			t.Error("S3UseSSL = false, want true")
+		}
+		if cfg.MaxUploadBytes != 1024 {
+			t.Errorf("MaxUploadBytes = %d, want 1024", cfg.MaxUploadBytes)
+		}
+	})
+
+	t.Run("rejects invalid MAX_UPLOAD_BYTES", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("MAX_UPLOAD_BYTES", "-1")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected error for negative limit")
 		}
 	})
 }

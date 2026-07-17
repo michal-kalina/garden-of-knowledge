@@ -41,10 +41,16 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-gok}:${POSTGRES_PASSWORD:-gok_dev_password}@postgres:5432/${POSTGRES_DB:-gok}?sslmode=disable
       HTTP_ADDR: ":8080"
       PARSER_URL: http://parser:8000
+      S3_ENDPOINT: minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-gok}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-gok_dev_password}
+      S3_BUCKET: documents
     ports:
       - "8080:8080"
     depends_on:
       postgres:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
   worker:

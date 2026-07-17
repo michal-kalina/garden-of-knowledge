@@ -10,8 +10,8 @@
 - [x] ADRs 0001–0003
 
 ## Phase 1 — Ingestion pipeline
-- [ ] `POST /documents` — upload to MinIO, insert document + enqueue job in one transaction
-- [ ] `GET /documents` / `GET /documents/{id}` — status tracking
+- [x] `POST /documents` — upload to MinIO, insert document + enqueue job in one transaction
+- [x] `GET /documents` / `GET /documents/{id}` — status tracking
 - [ ] Worker: fetch file → call parser → chunk → embed → store chunks → mark ready
 - [ ] Real PDF/Markdown parsing in the parser service (docling)
 - [ ] Chunking strategies (fixed-size with overlap first; document-structure-aware later)

@@ -1,6 +1,6 @@
-.PHONY: up down build test lint logs
+.PHONY: up down build test lint logs upgrade mod
 
-up: ## Uruchom cały stack lokalnie
+up: ## Run the application in the background
 	docker compose up --build -d
 
 down:
@@ -17,3 +17,9 @@ test:
 
 lint:
 	cd backend && go vet ./...
+
+upgrade:
+	cd backend && go get -u ./...
+
+mod:
+	cd backend && go mod tidy

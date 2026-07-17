@@ -1,4 +1,4 @@
-// Command api uruchamia serwer HTTP Garden of Knowledge.
+// Command api runs the Garden of Knowledge HTTP server.
 package main
 
 import (
@@ -13,7 +13,9 @@ import (
 
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/config"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/database"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/documents"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/httpserver"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/storage"
 )
 
 func main() {
@@ -40,9 +42,20 @@ func run(logger *slog.Logger) error {
 	defer db.Close()
 	logger.Info("database connected")
 
+	store, err := storage.NewMinIO(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3UseSSL)
+	if err != nil {
+		return err
+	}
+	if err := store.EnsureBucket(ctx); err != nil {
+		return err
+	}
+	logger.Info("object storage ready", "bucket", cfg.S3Bucket)
+
+	docs := documents.NewService(store, documents.NewRepository(db))
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpserver.New(db, logger),
+		Handler:           httpserver.New(db, docs, cfg.MaxUploadBytes, logger),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
