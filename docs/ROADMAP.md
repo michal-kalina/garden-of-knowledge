@@ -12,8 +12,9 @@
 ## Phase 1 — Ingestion pipeline
 - [x] `POST /documents` — upload to MinIO, insert document + enqueue job in one transaction
 - [x] `GET /documents` / `GET /documents/{id}` — status tracking
+- [x] Parser client and embeddings client (Voyage + offline fake) in Go
 - [ ] Worker: fetch file → call parser → chunk → embed → store chunks → mark ready
-- [ ] Real PDF/Markdown parsing in the parser service (docling)
+- [x] Real PDF/Markdown parsing (PyMuPDF + native Markdown; docling documented as the OCR upgrade path — ADR-0004)
 - [x] Chunking strategies: recursive (baseline with overlap) and structure-aware (heading inheritance, atomic tables) behind a common `Chunker` interface
 - [ ] Retry with attempt limits; failed jobs surface the error on the document
 - [ ] Migration tooling (goose), HNSW index on embeddings

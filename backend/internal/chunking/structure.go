@@ -21,6 +21,7 @@ type StructureChunker struct {
 	Count TokenCounter
 }
 
+// compile-time check that StructureChunker implements Chunker
 var _ Chunker = StructureChunker{}
 
 func (c StructureChunker) params() (target int, count TokenCounter) {

@@ -1,21 +1,22 @@
-"""Service parsing documents.
+"""Document parsing service.
 
-Python exists in this project only where it has a real advantage:
-document parsing ecosystem (docling, unstructured, OCR).
-Phase 0: health-check and stub /parse defining the API contract.
-Phase 1: proper PDF and Markdown parsing.
+Python exists in this project only where it has a real edge: the document
+parsing ecosystem. Phase 1 step 3: real Markdown and PDF parsing behind the
+same block contract established in Phase 0 (see parsers.py and ADR-0004).
 """
 
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI, HTTPException, UploadFile
 from pydantic import BaseModel
 
-app = FastAPI(title="GoK Parser", version="0.1.0")
+from app.parsers import parse_markdown, parse_pdf
+
+app = FastAPI(title="GoK Parser", version="0.2.0")
 
 
 class ParsedBlock(BaseModel):
-    """A single block of content extracted from a document (paragraph, heading, table cell)."""
+    """A single content block extracted from a document."""
 
-    type: str  # e.g., "paragraph", "heading", "table"
+    type: str  # "heading" | "paragraph" | "table"
     text: str
     page: int | None = None
 
@@ -26,6 +27,9 @@ class ParseResponse(BaseModel):
     blocks: list[ParsedBlock]
 
 
+MARKDOWN_TYPES = {"text/markdown", "text/x-markdown", "text/plain"}
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
@@ -33,15 +37,26 @@ def healthz() -> dict[str, str]:
 
 @app.post("/parse", response_model=ParseResponse)
 async def parse(file: UploadFile) -> ParseResponse:
-    """Parses an uploaded file and returns a list of content blocks.
-
-    Phase 0: stub — returns the content as a single block for text files,
-    to establish the API contract between the worker (Go) and the parser (Python).
-    """
+    """Accept a file and return its content as a list of typed blocks."""
+    content_type = file.content_type or "application/octet-stream"
     raw = await file.read()
-    text = raw.decode("utf-8", errors="replace")
+
+    if content_type == "application/pdf":
+        try:
+            blocks = parse_pdf(raw)
+        except Exception as exc:  # pymupdf raises various types for broken files
+            raise HTTPException(
+                status_code=422, detail=f"failed to parse PDF: {exc}"
+            ) from exc
+    elif content_type in MARKDOWN_TYPES:
+        blocks = parse_markdown(raw.decode("utf-8", errors="replace"))
+    else:
+        raise HTTPException(
+            status_code=415, detail=f"unsupported content type: {content_type}"
+        )
+
     return ParseResponse(
         filename=file.filename or "unknown",
-        content_type=file.content_type or "application/octet-stream",
-        blocks=[ParsedBlock(type="paragraph", text=text, page=None)],
+        content_type=content_type,
+        blocks=[ParsedBlock(type=b.type, text=b.text, page=b.page) for b in blocks],
     )

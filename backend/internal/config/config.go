@@ -31,6 +31,12 @@ type Config struct {
 
 	// MaxUploadBytes caps the size of a single document upload.
 	MaxUploadBytes int64
+
+	// EmbeddingsProvider selects the Embedder implementation: "voyage" or
+	// "fake". Defaults to "voyage" when VOYAGE_API_KEY is set, otherwise
+	// "fake" (offline development).
+	EmbeddingsProvider string
+	VoyageAPIKey       string
 }
 
 func Load() (Config, error) {
@@ -63,6 +69,25 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("invalid S3_USE_SSL %q: %w", v, err)
 		}
 		cfg.S3UseSSL = b
+	}
+	cfg.VoyageAPIKey = os.Getenv("VOYAGE_API_KEY")
+	cfg.EmbeddingsProvider = os.Getenv("EMBEDDINGS_PROVIDER")
+	if cfg.EmbeddingsProvider == "" {
+		if cfg.VoyageAPIKey != "" {
+			cfg.EmbeddingsProvider = "voyage"
+		} else {
+			cfg.EmbeddingsProvider = "fake"
+		}
+	}
+	switch cfg.EmbeddingsProvider {
+	case "voyage":
+		if cfg.VoyageAPIKey == "" {
+			return Config{}, fmt.Errorf("EMBEDDINGS_PROVIDER=voyage requires VOYAGE_API_KEY")
+		}
+	case "fake":
+		// Explicitly allowed: offline dev without an API key.
+	default:
+		return Config{}, fmt.Errorf("unknown EMBEDDINGS_PROVIDER %q", cfg.EmbeddingsProvider)
 	}
 	if v := os.Getenv("MAX_UPLOAD_BYTES"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)

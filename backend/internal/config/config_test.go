@@ -70,6 +70,45 @@ func TestLoad(t *testing.T) {
 		}
 	})
 
+	t.Run("embeddings provider defaults", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("EMBEDDINGS_PROVIDER", "")
+		t.Setenv("VOYAGE_API_KEY", "")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.EmbeddingsProvider != "fake" {
+			t.Errorf("provider = %q, want fake without key", cfg.EmbeddingsProvider)
+		}
+
+		t.Setenv("VOYAGE_API_KEY", "vk")
+		cfg, err = Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.EmbeddingsProvider != "voyage" {
+			t.Errorf("provider = %q, want voyage with key", cfg.EmbeddingsProvider)
+		}
+	})
+
+	t.Run("voyage provider requires a key", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("EMBEDDINGS_PROVIDER", "voyage")
+		t.Setenv("VOYAGE_API_KEY", "")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("rejects unknown embeddings provider", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("EMBEDDINGS_PROVIDER", "quantum")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
 	t.Run("rejects invalid MAX_UPLOAD_BYTES", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://x")
 		t.Setenv("MAX_UPLOAD_BYTES", "-1")

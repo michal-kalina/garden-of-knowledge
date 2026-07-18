@@ -37,11 +37,11 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install
-        run: pip install -r requirements.txt ruff
+        run: pip install -r requirements.txt ruff pytest
       - name: Lint
-        run: ruff check app
-      - name: Import smoke test
-        run: python -c "from app.main import app"
+        run: ruff check app tests
+      - name: Test
+        run: python -m pytest tests/ -q
 
   docker:
     runs-on: ubuntu-latest

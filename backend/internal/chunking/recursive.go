@@ -20,6 +20,7 @@ type RecursiveChunker struct {
 	Count TokenCounter
 }
 
+// compile-time check that RecursiveChunker implements Chunker
 var _ Chunker = RecursiveChunker{}
 
 func (c RecursiveChunker) params() (target, overlap int, count TokenCounter) {
