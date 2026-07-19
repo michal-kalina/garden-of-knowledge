@@ -1,7 +1,6 @@
 -- Phase 0: base schema.
--- In dev, migrations run via docker-entrypoint-initdb.d (only on first start
--- of a fresh volume).
--- TODO(phase-1): move to a migration tool (goose / golang-migrate).
+-- Applied by the embedded migration runner (internal/database/migrate.go)
+-- at service startup; tracked in schema_migrations. See ADR-0005.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 

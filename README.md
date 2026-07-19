@@ -2,7 +2,7 @@
 
 A self-hosted, production-grade RAG (Retrieval-Augmented Generation) system. Upload your documents, let the pipeline parse, chunk and embed them, then have a conversation grounded in your own knowledge base — with citations pointing back to the exact source fragments.
 
-> **Status: Phase 0 — foundation.** Working skeleton: services boot via `docker compose up`, health checks pass, the Postgres-backed job queue mechanics are in place. See [ROADMAP](docs/ROADMAP.md).
+> **Status: Phase 1 — ingestion pipeline complete.** Documents uploaded via the API are parsed (PDF/Markdown), chunked, embedded and stored in pgvector by the worker, with attempt-limited retry. See [ROADMAP](docs/ROADMAP.md).
 
 ## Architecture
 
@@ -48,10 +48,10 @@ Every non-obvious choice is documented as an ADR in [`docs/adr/`](docs/adr/). Hi
 ## Repository layout
 
 ```
-backend/    Go — API gateway (cmd/api) and ingestion worker (cmd/worker)
-parser/     Python — document parsing service (FastAPI)
+backend/    Go — API gateway (cmd/api) and ingestion worker (cmd/worker);
+            SQL migrations embedded in internal/database/migrations
+parser/     Python — document parsing service (FastAPI + PyMuPDF)
 web/        Next.js frontend (Phase 2)
-db/         SQL migrations
 deploy/     Kubernetes manifests (Phase 5)
 docs/       ADRs, roadmap
 ```

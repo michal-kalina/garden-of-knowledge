@@ -40,7 +40,10 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer db.Close()
-	logger.Info("database connected")
+	if err := database.Migrate(ctx, db, logger); err != nil {
+		return err
+	}
+	logger.Info("database ready")
 
 	store, err := storage.NewMinIO(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3UseSSL)
 	if err != nil {

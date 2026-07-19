@@ -1,23 +1,21 @@
-// Command worker processes ingestion jobs from the Postgres-backed queue.
-//
-// Phase 1 step 1: the worker picks a job via SELECT ... FOR UPDATE SKIP LOCKED
-// and completes it, moving the document to 'ready' so the status flow is
-// observable end-to-end. The real pipeline (fetch file from MinIO, parse via
-// the Python service, chunk, embed) lands in the next steps of Phase 1.
+// Command worker runs the ingestion pipeline against the Postgres-backed
+// job queue. See internal/worker for the pipeline itself.
 package main
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/chunking"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/config"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/database"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/embeddings"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/parserclient"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/storage"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/worker"
 )
 
 func main() {
@@ -42,72 +40,40 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer db.Close()
+	if err := database.Migrate(ctx, db, logger); err != nil {
+		return err
+	}
+	logger.Info("database ready")
+
+	store, err := storage.NewMinIO(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3UseSSL)
+	if err != nil {
+		return err
+	}
+
+	var embedder embeddings.Embedder
+	switch cfg.EmbeddingsProvider {
+	case "voyage":
+		embedder = embeddings.NewVoyage(cfg.VoyageAPIKey)
+		logger.Info("embeddings provider: voyage")
+	default:
+		embedder = embeddings.Fake{}
+		logger.Warn("embeddings provider: FAKE — vectors are deterministic noise; " +
+			"set VOYAGE_API_KEY for real retrieval quality")
+	}
+
+	proc := &worker.Processor{
+		DB:       db,
+		Store:    store,
+		Parser:   parserclient.New(cfg.ParserURL),
+		Embedder: embedder,
+		// Structure-aware is the default strategy (heading inheritance,
+		// atomic tables); Phase 4 evals will compare it against the
+		// recursive baseline and make this configurable.
+		Chunker: chunking.StructureChunker{TargetTokens: 500},
+		Logger:  logger,
+	}
+
 	logger.Info("worker started", "poll_interval", cfg.WorkerPollInterval.String())
-
-	ticker := time.NewTicker(cfg.WorkerPollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			logger.Info("worker shutting down")
-			return nil
-		case <-ticker.C:
-			if err := processOne(ctx, db, logger); err != nil {
-				logger.Error("process job", "error", err)
-			}
-		}
-	}
-}
-
-// processOne claims a single queued job and processes it. SKIP LOCKED ensures
-// multiple worker instances never claim the same job.
-func processOne(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback() //nolint:errcheck // rollback after commit is a no-op
-
-	var jobID int64
-	var documentID string
-	err = tx.QueryRowContext(ctx, `
-		SELECT id, document_id
-		FROM ingestion_jobs
-		WHERE status = 'queued'
-		ORDER BY created_at
-		FOR UPDATE SKIP LOCKED
-		LIMIT 1
-	`).Scan(&jobID, &documentID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil // empty queue is the normal idle state
-	}
-	if err != nil {
-		return err
-	}
-
-	logger.Info("picked job", "job_id", jobID, "document_id", documentID)
-
-	// TODO(phase-1): fetch the file from MinIO, call the parser, chunk,
-	// embed, store chunks — then split this into claim -> work -> finalize
-	// with retry accounting. For now the job completes immediately so the
-	// pending -> ready status transition is visible in the API.
-	_, err = tx.ExecContext(ctx, `
-		UPDATE ingestion_jobs
-		SET status = 'done', attempts = attempts + 1, updated_at = now()
-		WHERE id = $1
-	`, jobID)
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `
-		UPDATE documents
-		SET status = 'ready', updated_at = now()
-		WHERE id = $1
-	`, documentID)
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit()
+	proc.Run(ctx, cfg.WorkerPollInterval)
+	return nil
 }

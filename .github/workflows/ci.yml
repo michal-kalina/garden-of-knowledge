@@ -8,47 +8,61 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
           cache-dependency-path: backend/go.sum
-      - name: Format check
-        run: test -z "$(gofmt -l .)"
-      - name: Vet
-        run: go vet ./...
+      - name: Lint
+        run: make lint-backend
       - name: Build
-        run: go build ./...
+        run: make build
       - name: Test
-        run: go test -race ./...
+        run: make test-backend
 
   parser:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: parser
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
-      - name: Install
-        run: pip install -r requirements.txt ruff pytest
       - name: Lint
-        run: ruff check app tests
+        run: make lint-parser
       - name: Test
-        run: python -m pytest tests/ -q
+        run: make test-parser
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: gok
+          POSTGRES_PASSWORD: gok
+          POSTGRES_DB: gok_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gok"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: backend/go.sum
+      - name: Integration tests
+        run: make test-integration
+        env:
+          DATABASE_URL: postgres://gok:gok@localhost:5432/gok_test?sslmode=disable
 
   docker:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Build images
-        run: |
-          docker build --target api -t gok-api ./backend
-          docker build --target worker -t gok-worker ./backend
-          docker build -t gok-parser ./parser
+        run: make docker-build
