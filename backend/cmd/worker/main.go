@@ -50,16 +50,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	var embedder embeddings.Embedder
-	switch cfg.EmbeddingsProvider {
-	case "voyage":
-		embedder = embeddings.NewVoyage(cfg.VoyageAPIKey)
-		logger.Info("embeddings provider: voyage")
-	default:
-		embedder = embeddings.Fake{}
-		logger.Warn("embeddings provider: FAKE — vectors are deterministic noise; " +
-			"set VOYAGE_API_KEY for real retrieval quality")
-	}
+	embedder := embeddings.FromProvider(cfg.EmbeddingsProvider, cfg.VoyageAPIKey, logger)
 
 	proc := &worker.Processor{
 		DB:       db,

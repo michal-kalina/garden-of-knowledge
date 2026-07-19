@@ -12,13 +12,31 @@ import (
 type server struct {
 	db             *sql.DB
 	docs           DocumentService
+	search         SearchService
 	logger         *slog.Logger
 	maxUploadBytes int64
 }
 
+// Deps carries the server's dependencies. A struct (rather than a growing
+// positional parameter list) keeps call sites readable as endpoints
+// accumulate.
+type Deps struct {
+	DB             *sql.DB
+	Documents      DocumentService
+	Search         SearchService
+	MaxUploadBytes int64
+	Logger         *slog.Logger
+}
+
 // New builds the API router.
-func New(db *sql.DB, docs DocumentService, maxUploadBytes int64, logger *slog.Logger) http.Handler {
-	s := &server{db: db, docs: docs, logger: logger, maxUploadBytes: maxUploadBytes}
+func New(d Deps) http.Handler {
+	s := &server{
+		db:             d.DB,
+		docs:           d.Documents,
+		search:         d.Search,
+		logger:         d.Logger,
+		maxUploadBytes: d.MaxUploadBytes,
+	}
 
 	mux := http.NewServeMux()
 
@@ -42,8 +60,9 @@ func New(db *sql.DB, docs DocumentService, maxUploadBytes int64, logger *slog.Lo
 	mux.HandleFunc("POST /documents", s.handleDocumentUpload)
 	mux.HandleFunc("GET /documents", s.handleDocumentList)
 	mux.HandleFunc("GET /documents/{id}", s.handleDocumentGet)
+	mux.HandleFunc("POST /search", s.handleSearch)
 
-	return logging(logger)(mux)
+	return logging(d.Logger)(mux)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

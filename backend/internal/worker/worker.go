@@ -13,11 +13,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/chunking"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/database"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/embeddings"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/storage"
 )
@@ -207,7 +206,7 @@ func (p *Processor) process(ctx context.Context, t task) error {
 			INSERT INTO chunks (document_id, ordinal, content, heading, page_start, page_end, embedding)
 			VALUES ($1, $2, $3, $4, $5, $6, $7::vector)
 		`, t.docID, i, c.Content, c.Heading, c.StartPage, c.EndPage,
-			vectorLiteral(vectors[i])); err != nil {
+			database.VectorLiteral(vectors[i])); err != nil {
 			return fmt.Errorf("insert chunk %d: %w", i, err)
 		}
 	}
@@ -264,21 +263,4 @@ func (p *Processor) fail(ctx context.Context, t task, procErr error) error {
 		}
 	}
 	return tx.Commit()
-}
-
-// vectorLiteral renders a float32 slice in pgvector's text format:
-// [0.1,0.2,...]. Going through the text representation keeps us on plain
-// database/sql without a pgvector driver binding.
-func vectorLiteral(v []float32) string {
-	var b strings.Builder
-	b.Grow(len(v) * 8)
-	b.WriteByte('[')
-	for i, x := range v {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		b.WriteString(strconv.FormatFloat(float64(x), 'f', -1, 32))
-	}
-	b.WriteByte(']')
-	return b.String()
 }

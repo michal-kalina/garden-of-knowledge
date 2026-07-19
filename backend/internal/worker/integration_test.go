@@ -175,7 +175,7 @@ func TestPipelineIntegration(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `
 		SELECT content FROM chunks WHERE document_id = $1
 		ORDER BY embedding <=> $2::vector LIMIT 1
-	`, doc.ID, vectorLiteral(qvec[0])).Scan(&nearest); err != nil {
+	`, doc.ID, database.VectorLiteral(qvec[0])).Scan(&nearest); err != nil {
 		t.Fatalf("vector search: %v", err)
 	}
 	if nearest == "" {

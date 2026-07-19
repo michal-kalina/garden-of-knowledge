@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/documents"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/retrieval"
 )
 
 // fakeDocs is an in-memory DocumentService used to test handlers in isolation.
@@ -53,12 +54,37 @@ func (f *fakeDocs) Get(_ context.Context, id string) (documents.Document, error)
 	return d, nil
 }
 
+// fakeSearch returns canned results and records the last query.
+type fakeSearch struct {
+	lastQuery string
+	lastLimit int
+	results   []retrieval.Result
+}
+
+func (f *fakeSearch) Search(_ context.Context, query string, limit int) ([]retrieval.Result, error) {
+	f.lastQuery, f.lastLimit = query, limit
+	return f.results, nil
+}
+
 func newTestServer(t *testing.T) (http.Handler, *fakeDocs) {
 	t.Helper()
+	h, fake, _ := newTestServerWithSearch(t)
+	return h, fake
+}
+
+func newTestServerWithSearch(t *testing.T) (http.Handler, *fakeDocs, *fakeSearch) {
+	t.Helper()
 	fake := &fakeDocs{docs: map[string]documents.Document{}}
+	search := &fakeSearch{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	// db is only used by /readyz, which these tests do not exercise.
-	return New(nil, fake, 1<<20 /* 1 MiB limit for tests */, logger), fake
+	h := New(Deps{
+		// DB is only used by /readyz, which these tests do not exercise.
+		Documents:      fake,
+		Search:         search,
+		MaxUploadBytes: 1 << 20, // 1 MiB limit for tests
+		Logger:         logger,
+	})
+	return h, fake, search
 }
 
 // multipartBody builds a multipart request body with a single "file" part.
@@ -168,6 +194,54 @@ func TestDocumentGet(t *testing.T) {
 		srv.ServeHTTP(rec, req)
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("status = %d, want 404", rec.Code)
+		}
+	})
+}
+
+func TestSearch(t *testing.T) {
+	t.Run("returns results and passes query through", func(t *testing.T) {
+		srv, _, search := newTestServerWithSearch(t)
+		search.results = []retrieval.Result{{ChunkID: 7, Content: "hit", Score: 0.03}}
+
+		req := httptest.NewRequest(http.MethodPost, "/search",
+			strings.NewReader(`{"query":"vacation days","limit":5}`))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
+		}
+		if search.lastQuery != "vacation days" || search.lastLimit != 5 {
+			t.Errorf("service got query=%q limit=%d", search.lastQuery, search.lastLimit)
+		}
+		var resp struct {
+			Results []retrieval.Result `json:"results"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatal(err)
+		}
+		if len(resp.Results) != 1 || resp.Results[0].ChunkID != 7 {
+			t.Errorf("unexpected results: %+v", resp.Results)
+		}
+	})
+
+	t.Run("rejects empty query with 400", func(t *testing.T) {
+		srv, _, _ := newTestServerWithSearch(t)
+		req := httptest.NewRequest(http.MethodPost, "/search", strings.NewReader(`{"query":"  "}`))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", rec.Code)
+		}
+	})
+
+	t.Run("rejects malformed JSON with 400", func(t *testing.T) {
+		srv, _, _ := newTestServerWithSearch(t)
+		req := httptest.NewRequest(http.MethodPost, "/search", strings.NewReader(`{`))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", rec.Code)
 		}
 	})
 }

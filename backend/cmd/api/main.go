@@ -14,7 +14,9 @@ import (
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/config"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/database"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/documents"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/embeddings"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/httpserver"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/retrieval"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/storage"
 )
 
@@ -55,10 +57,18 @@ func run(logger *slog.Logger) error {
 	logger.Info("object storage ready", "bucket", cfg.S3Bucket)
 
 	docs := documents.NewService(store, documents.NewRepository(db))
+	embedder := embeddings.FromProvider(cfg.EmbeddingsProvider, cfg.VoyageAPIKey, logger)
+	searcher := retrieval.New(db, embedder)
 
 	srv := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpserver.New(db, docs, cfg.MaxUploadBytes, logger),
+		Addr: cfg.HTTPAddr,
+		Handler: httpserver.New(httpserver.Deps{
+			DB:             db,
+			Documents:      docs,
+			Search:         searcher,
+			MaxUploadBytes: cfg.MaxUploadBytes,
+			Logger:         logger,
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

@@ -22,7 +22,7 @@
 
 ## Phase 2 — Retrieval & chat
 - [ ] `POST /chat` — SSE streaming responses
-- [ ] Hybrid search: vector + full-text, fused with RRF
+- [x] Hybrid search: vector (HNSW, cosine) + full-text (websearch_to_tsquery), fused with RRF; exposed as `POST /search` with per-retriever ranks for debuggability
 - [ ] Prompt assembly with retrieved context; citations mapped to chunk IDs
 - [ ] Next.js frontend: upload view, chat with streaming, citation panel
 
