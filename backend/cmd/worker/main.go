@@ -50,7 +50,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	embedder := embeddings.FromProvider(cfg.EmbeddingsProvider, cfg.VoyageAPIKey, logger)
+	embedder := embeddings.FromProvider(cfg.EmbeddingsProvider, cfg.VoyageAPIKey, cfg.VoyageModel, logger)
 
 	proc := &worker.Processor{
 		DB:       db,

@@ -15,28 +15,36 @@ const voyageMaxBatch = 96
 
 // Voyage calls the Voyage AI embeddings API.
 type Voyage struct {
-	APIKey  string
-	Model   string
-	BaseURL string
-	HTTP    *http.Client
+	APIKey    string
+	Model     string
+	OutputDim int
+	BaseURL   string
+	HTTP      *http.Client
 }
 
 // compile-time check that *Voyage implements Embedder
 var _ Embedder = (*Voyage)(nil)
 
-func NewVoyage(apiKey string) *Voyage {
+// NewVoyage builds a client for the given model (e.g. "voyage-4"). The
+// output dimension is pinned to Dim explicitly rather than relying on the
+// model's default: the 4-series supports 256/512/1024/2048, and a future
+// model swap must fail loudly here — not as a cryptic pgvector insert error
+// against the vector(1024) column.
+func NewVoyage(apiKey, model string) *Voyage {
 	return &Voyage{
-		APIKey:  apiKey,
-		Model:   "voyage-3",
-		BaseURL: "https://api.voyageai.com",
-		HTTP:    &http.Client{Timeout: 60 * time.Second},
+		APIKey:    apiKey,
+		Model:     model,
+		OutputDim: Dim,
+		BaseURL:   "https://api.voyageai.com",
+		HTTP:      &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
 type voyageRequest struct {
-	Input     []string `json:"input"`
-	Model     string   `json:"model"`
-	InputType string   `json:"input_type"`
+	Input           []string `json:"input"`
+	Model           string   `json:"model"`
+	InputType       string   `json:"input_type"`
+	OutputDimension int      `json:"output_dimension,omitempty"`
 }
 
 type voyageResponse struct {
@@ -64,9 +72,10 @@ func (v *Voyage) Embed(ctx context.Context, texts []string, input InputType) ([]
 
 func (v *Voyage) embedBatch(ctx context.Context, texts []string, input InputType, out [][]float32) error {
 	payload, err := json.Marshal(voyageRequest{
-		Input:     texts,
-		Model:     v.Model,
-		InputType: string(input),
+		Input:           texts,
+		Model:           v.Model,
+		InputType:       string(input),
+		OutputDimension: v.OutputDim,
 	})
 	if err != nil {
 		return err

@@ -38,10 +38,23 @@ type Config struct {
 	EmbeddingsProvider string
 	VoyageAPIKey       string
 
-	// AnthropicAPIKey enables the /chat endpoint; empty leaves chat
-	// unconfigured (503) while the rest of the API works.
-	AnthropicAPIKey string
-	AnthropicModel  string
+	// VoyageModel selects the Voyage embedding model. It must produce
+	// vectors matching the vector(1024) column (the client pins the
+	// dimension explicitly).
+	VoyageModel string
+
+	// LLMProvider selects the chat backend: "anthropic" or "openrouter".
+	// Empty (no key configured) leaves /chat unconfigured (503) while the
+	// rest of the API works. Inferred from which API key is set when not
+	// given explicitly; anthropic wins if both keys are present.
+	LLMProvider string
+	// LLMModel is provider-specific: an Anthropic model id, or an
+	// OpenRouter id like "anthropic/claude-sonnet-4.5". Required for
+	// openrouter (hundreds of models — an implicit default would be a
+	// guess); defaults for anthropic.
+	LLMModel string
+	// LLMAPIKey is resolved from the provider-specific env var.
+	LLMAPIKey string
 }
 
 func Load() (Config, error) {
@@ -75,9 +88,44 @@ func Load() (Config, error) {
 		}
 		cfg.S3UseSSL = b
 	}
-	cfg.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
-	cfg.AnthropicModel = getenvDefault("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 	cfg.VoyageAPIKey = os.Getenv("VOYAGE_API_KEY")
+	cfg.VoyageModel = getenvDefault("VOYAGE_MODEL", "voyage-4")
+
+	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
+	openrouterKey := os.Getenv("OPENROUTER_API_KEY")
+	cfg.LLMProvider = os.Getenv("LLM_PROVIDER")
+	if cfg.LLMProvider == "" {
+		switch {
+		case anthropicKey != "":
+			cfg.LLMProvider = "anthropic"
+		case openrouterKey != "":
+			cfg.LLMProvider = "openrouter"
+		}
+	}
+	cfg.LLMModel = os.Getenv("LLM_MODEL")
+	switch cfg.LLMProvider {
+	case "":
+		// Chat stays disabled.
+	case "anthropic":
+		if anthropicKey == "" {
+			return Config{}, fmt.Errorf("LLM_PROVIDER=anthropic requires ANTHROPIC_API_KEY")
+		}
+		cfg.LLMAPIKey = anthropicKey
+		if cfg.LLMModel == "" {
+			cfg.LLMModel = "claude-sonnet-4-6"
+		}
+	case "openrouter":
+		if openrouterKey == "" {
+			return Config{}, fmt.Errorf("LLM_PROVIDER=openrouter requires OPENROUTER_API_KEY")
+		}
+		cfg.LLMAPIKey = openrouterKey
+		if cfg.LLMModel == "" {
+			return Config{}, fmt.Errorf(
+				"LLM_PROVIDER=openrouter requires LLM_MODEL (e.g. anthropic/claude-sonnet-4.5)")
+		}
+	default:
+		return Config{}, fmt.Errorf("unknown LLM_PROVIDER %q", cfg.LLMProvider)
+	}
 	cfg.EmbeddingsProvider = os.Getenv("EMBEDDINGS_PROVIDER")
 	if cfg.EmbeddingsProvider == "" {
 		if cfg.VoyageAPIKey != "" {

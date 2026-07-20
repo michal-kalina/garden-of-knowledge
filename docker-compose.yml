@@ -45,8 +45,11 @@ services:
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-gok_dev_password}
       S3_BUCKET: documents
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      VOYAGE_MODEL: ${VOYAGE_MODEL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      LLM_MODEL: ${LLM_MODEL:-}
     ports:
       - "8080:8080"
     depends_on:
@@ -67,6 +70,7 @@ services:
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-gok_dev_password}
       S3_BUCKET: documents
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      VOYAGE_MODEL: ${VOYAGE_MODEL:-}
     depends_on:
       postgres:
         condition: service_healthy

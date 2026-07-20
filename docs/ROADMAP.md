@@ -22,6 +22,8 @@
 
 ## Phase 2 — Retrieval & chat
 - [x] `POST /chat` — SSE streaming (sources → deltas → done), stateless
+- [x] Multi-provider LLM layer: Anthropic and OpenRouter behind the `Streamer` interface, selected by config
+- [x] Embeddings on `voyage-4` (200M free tokens) with the output dimension pinned to the schema
 - [x] Hybrid search: vector (HNSW, cosine) + full-text (websearch_to_tsquery), fused with RRF; exposed as `POST /search` with per-retriever ranks for debuggability
 - [x] Prompt assembly with numbered sources and metadata; [n] citations mapped to chunk IDs via the sources event
 - [ ] Next.js frontend: upload view, chat with streaming, citation panel

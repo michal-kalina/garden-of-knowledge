@@ -59,15 +59,19 @@ func run(logger *slog.Logger) error {
 	logger.Info("object storage ready", "bucket", cfg.S3Bucket)
 
 	docs := documents.NewService(store, documents.NewRepository(db))
-	embedder := embeddings.FromProvider(cfg.EmbeddingsProvider, cfg.VoyageAPIKey, logger)
+	embedder := embeddings.FromProvider(cfg.EmbeddingsProvider, cfg.VoyageAPIKey, cfg.VoyageModel, logger)
 	searcher := retrieval.New(db, embedder)
 
 	var chatSvc httpserver.ChatService
-	if cfg.AnthropicAPIKey != "" {
-		chatSvc = chat.New(searcher, llm.NewAnthropic(cfg.AnthropicAPIKey, cfg.AnthropicModel))
-		logger.Info("chat enabled", "model", cfg.AnthropicModel)
+	if cfg.LLMProvider != "" {
+		streamer, err := llm.FromProvider(cfg.LLMProvider, cfg.LLMModel, cfg.LLMAPIKey)
+		if err != nil {
+			return err
+		}
+		chatSvc = chat.New(searcher, streamer)
+		logger.Info("chat enabled", "provider", cfg.LLMProvider, "model", cfg.LLMModel)
 	} else {
-		logger.Warn("chat disabled: ANTHROPIC_API_KEY not set")
+		logger.Warn("chat disabled: set ANTHROPIC_API_KEY, or OPENROUTER_API_KEY with LLM_MODEL")
 	}
 
 	srv := &http.Server{

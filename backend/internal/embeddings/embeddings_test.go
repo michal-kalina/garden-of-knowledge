@@ -62,8 +62,11 @@ func TestVoyage(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatal(err)
 			}
-			if req.Model != "voyage-3" || req.InputType != "document" {
+			if req.Model != "voyage-4" || req.InputType != "document" {
 				t.Errorf("unexpected request: %+v", req)
+			}
+			if req.OutputDimension != Dim {
+				t.Errorf("output_dimension = %d, want %d (must be pinned)", req.OutputDimension, Dim)
 			}
 			// Respond deliberately out of order; the client must re-order
 			// by index.
@@ -75,7 +78,7 @@ func TestVoyage(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		v := NewVoyage("test-key")
+		v := NewVoyage("test-key", "voyage-4")
 		v.BaseURL = srv.URL
 		got, err := v.Embed(context.Background(), []string{"a", "b"}, InputDocument)
 		if err != nil {
@@ -93,7 +96,7 @@ func TestVoyage(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		v := NewVoyage("k")
+		v := NewVoyage("k", "voyage-4")
 		v.BaseURL = srv.URL
 		_, err := v.Embed(context.Background(), []string{"a"}, InputQuery)
 		if err == nil {
@@ -110,7 +113,7 @@ func TestVoyage(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		v := NewVoyage("k")
+		v := NewVoyage("k", "voyage-4")
 		v.BaseURL = srv.URL
 		if _, err := v.Embed(context.Background(), []string{"a"}, InputDocument); err == nil {
 			t.Fatal("expected error for missing embeddings")

@@ -109,20 +109,70 @@ func TestLoad(t *testing.T) {
 		}
 	})
 
-	t.Run("anthropic model has a default and is overridable", func(t *testing.T) {
+	t.Run("llm provider is inferred from keys", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://x")
-		t.Setenv("ANTHROPIC_MODEL", "")
+		t.Setenv("LLM_PROVIDER", "")
+		t.Setenv("LLM_MODEL", "")
+		t.Setenv("ANTHROPIC_API_KEY", "")
+		t.Setenv("OPENROUTER_API_KEY", "")
+
 		cfg, err := Load()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.AnthropicModel == "" {
-			t.Error("AnthropicModel default missing")
+		if cfg.LLMProvider != "" {
+			t.Errorf("provider = %q, want disabled without keys", cfg.LLMProvider)
 		}
-		t.Setenv("ANTHROPIC_MODEL", "claude-x")
-		cfg, _ = Load()
-		if cfg.AnthropicModel != "claude-x" {
-			t.Errorf("AnthropicModel = %q", cfg.AnthropicModel)
+
+		t.Setenv("ANTHROPIC_API_KEY", "ak")
+		cfg, err = Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.LLMProvider != "anthropic" || cfg.LLMAPIKey != "ak" || cfg.LLMModel == "" {
+			t.Errorf("anthropic inference wrong: %+v", cfg)
+		}
+
+		t.Setenv("ANTHROPIC_API_KEY", "")
+		t.Setenv("OPENROUTER_API_KEY", "ok")
+		t.Setenv("LLM_MODEL", "anthropic/claude-sonnet-4.5")
+		cfg, err = Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.LLMProvider != "openrouter" || cfg.LLMAPIKey != "ok" {
+			t.Errorf("openrouter inference wrong: %+v", cfg)
+		}
+	})
+
+	t.Run("openrouter requires an explicit model", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("OPENROUTER_API_KEY", "ok")
+		t.Setenv("LLM_PROVIDER", "openrouter")
+		t.Setenv("LLM_MODEL", "")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected error without LLM_MODEL")
+		}
+	})
+
+	t.Run("explicit provider without its key errors", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("LLM_PROVIDER", "anthropic")
+		t.Setenv("ANTHROPIC_API_KEY", "")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected error without ANTHROPIC_API_KEY")
+		}
+	})
+
+	t.Run("voyage model defaults to voyage-4", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("VOYAGE_MODEL", "")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.VoyageModel != "voyage-4" {
+			t.Errorf("VoyageModel = %q, want voyage-4", cfg.VoyageModel)
 		}
 	})
 
