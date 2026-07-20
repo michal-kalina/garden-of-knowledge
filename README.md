@@ -2,7 +2,7 @@
 
 A self-hosted, production-grade RAG (Retrieval-Augmented Generation) system. Upload your documents, let the pipeline parse, chunk and embed them, then have a conversation grounded in your own knowledge base — with citations pointing back to the exact source fragments.
 
-> **Status: Phase 1 — ingestion pipeline complete.** Documents uploaded via the API are parsed (PDF/Markdown), chunked, embedded and stored in pgvector by the worker, with attempt-limited retry. See [ROADMAP](docs/ROADMAP.md).
+> **Status: Phase 2 complete.** Full RAG loop: upload → parse (PDF/Markdown) → chunk → embed (voyage-4) → hybrid search (vector + full-text, RRF) → streaming chat with clickable citations, all behind a Next.js UI. See [ROADMAP](docs/ROADMAP.md).
 
 ## Architecture
 
@@ -13,7 +13,7 @@ flowchart TB
     FE[Frontend · Next.js] --> API[API Gateway · Go<br/>auth, REST, SSE streaming]
     API -->|enqueue| Q[(Job queue<br/>Postgres SKIP LOCKED)]
     Q --> W[Ingestion worker · Go]
-    W -->|parse| P[Parser service · Python<br/>docling / OCR]
+    W -->|parse| P[Parser service · Python<br/>PyMuPDF]
     W --> PG[(PostgreSQL + pgvector<br/>chunks, metadata, chat history)]
     W --> S3[(Object storage · MinIO/S3)]
     API -->|hybrid search| PG
@@ -31,11 +31,12 @@ Requirements: Docker + Docker Compose.
 ```bash
 cp .env.example .env
 make up
-curl localhost:8080/healthz   # {"status":"ok"}
-curl localhost:8080/readyz    # {"status":"ready"}
+open http://localhost:3000    # web UI: upload, chat, citations
 ```
 
-MinIO console: http://localhost:9001 · Parser API docs: http://localhost:8000/docs
+MinIO console: http://localhost:9001 · Parser API docs: http://localhost:8000/docs · API health: http://localhost:8080/readyz
+
+For real answers set keys in `.env`: `VOYAGE_API_KEY` (embeddings; free 200M-token pool on voyage-4) and either `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` + `LLM_MODEL` for chat. Without them the stack still runs: embeddings fall back to a deterministic fake and chat answers 503.
 
 Without `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY` set in `.env`, chat stays disabled (503) and embeddings fall back to a deterministic fake (offline-friendly, but retrieval quality is meaningless). Get a Voyage key at [dash.voyageai.com](https://dash.voyageai.com).
 
@@ -53,7 +54,7 @@ Every non-obvious choice is documented as an ADR in [`docs/adr/`](docs/adr/). Hi
 backend/    Go — API gateway (cmd/api) and ingestion worker (cmd/worker);
             SQL migrations embedded in internal/database/migrations
 parser/     Python — document parsing service (FastAPI + PyMuPDF)
-web/        Next.js frontend (Phase 2)
+web/        Next.js frontend — upload, streaming chat, clickable citations
 deploy/     Kubernetes manifests (Phase 5)
 docs/       ADRs, roadmap
 ```

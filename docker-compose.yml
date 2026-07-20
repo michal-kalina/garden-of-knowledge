@@ -85,6 +85,14 @@ services:
     ports:
       - "8000:8000"
 
+  web:
+    build:
+      context: ./web
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
 volumes:
   pgdata:
   miniodata:

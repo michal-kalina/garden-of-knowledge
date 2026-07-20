@@ -26,7 +26,7 @@
 - [x] Embeddings on `voyage-4` (200M free tokens) with the output dimension pinned to the schema
 - [x] Hybrid search: vector (HNSW, cosine) + full-text (websearch_to_tsquery), fused with RRF; exposed as `POST /search` with per-retriever ranks for debuggability
 - [x] Prompt assembly with numbered sources and metadata; [n] citations mapped to chunk IDs via the sources event
-- [ ] Next.js frontend: upload view, chat with streaming, citation panel
+- [x] Next.js frontend (Tailwind + shadcn-style components): upload with live statuses, streaming chat, [n] citations flashing their source card
 
 ## Phase 3 — Users & history
 - [ ] JWT auth, per-user document isolation

@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Herbarium-meets-terminal palette: cool paper white, green-black ink,
+   fern green as the working accent. Statuses borrow a growth vocabulary:
+   amber while germinating (processing), fern when ready. */
+:root {
+  --background: 80 20% 98%;
+  --foreground: 160 13% 13%;
+  --border: 90 15% 87%;
+  --primary: 152 39% 30%;
+  --primary-foreground: 140 27% 96%;
+  --muted: 84 14% 93%;
+  --muted-foreground: 150 5% 38%;
+  --sidebar: 160 13% 12%;
+  --sidebar-foreground: 84 14% 93%;
+  --sidebar-muted: 155 8% 62%;
+  --destructive: 8 55% 42%;
+  --destructive-foreground: 20 60% 97%;
+  --amber: 40 60% 45%;
+  
+  --card: 80 20% 98%;
+  --card-foreground: 160 13% 13%;
+  --popover: 80 20% 99%;
+  --popover-foreground: 160 13% 13%;
+  --secondary: 84 14% 93%;
+  --secondary-foreground: 160 13% 13%;
+  --accent: 84 14% 90%;
+  --accent-foreground: 160 13% 13%;
+  --ring: 152 39% 30%;
+  --input: 90 15% 87%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-feature-settings: "cv02", "cv11";
+}
+
+/* Citation leaf-tag: the signature element. A [n] marker in the answer that
+   lights up its source card. */
+.citation {
+  @apply mx-0.5 inline-flex h-[1.15rem] min-w-[1.15rem] translate-y-[-0.15rem] cursor-pointer items-center justify-center rounded-sm bg-primary/10 px-1 font-mono text-[0.68rem] font-semibold text-primary transition-colors hover:bg-primary hover:text-primary-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary;
+}
+
+/* Source card flash when its citation is clicked. */
+@keyframes source-flash {
+  0% {
+    box-shadow: 0 0 0 2px hsl(var(--primary));
+    background: hsl(var(--primary) / 0.08);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    background: transparent;
+  }
+}
+.source-flash {
+  animation: source-flash 1.6s ease-out;
+}
+
+/* Germinating dot for documents mid-pipeline. */
+@keyframes germinate {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.germinate {
+  animation: germinate 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .source-flash,
+  .germinate {
+    animation: none;
+  }
+}

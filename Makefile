@@ -1,4 +1,4 @@
-.PHONY: up down logs build docker-build test test-backend test-parser test-integration lint lint-backend lint-parser venv-parser setup
+.PHONY: up down logs build build-web docker-build test test-backend test-parser test-integration lint lint-backend lint-parser venv-parser setup
 
 PARSER_VENV := parser/.venv
 
@@ -14,10 +14,14 @@ logs:
 build:
 	cd backend && go build ./...
 
+build-web:
+	cd web && npm ci && npm run build
+
 docker-build:
 	docker build --target api -t gok-api ./backend
 	docker build --target worker -t gok-worker ./backend
 	docker build -t gok-parser ./parser
+	docker build -t gok-web ./web
 
 # --- Tests ------------------------------------------------------------------
 
