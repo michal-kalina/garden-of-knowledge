@@ -109,6 +109,23 @@ func TestLoad(t *testing.T) {
 		}
 	})
 
+	t.Run("anthropic model has a default and is overridable", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("ANTHROPIC_MODEL", "")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.AnthropicModel == "" {
+			t.Error("AnthropicModel default missing")
+		}
+		t.Setenv("ANTHROPIC_MODEL", "claude-x")
+		cfg, _ = Load()
+		if cfg.AnthropicModel != "claude-x" {
+			t.Errorf("AnthropicModel = %q", cfg.AnthropicModel)
+		}
+	})
+
 	t.Run("rejects invalid MAX_UPLOAD_BYTES", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://x")
 		t.Setenv("MAX_UPLOAD_BYTES", "-1")

@@ -21,9 +21,9 @@
 - [x] Integration test of the full pipeline against real Postgres+pgvector (CI service container)
 
 ## Phase 2 — Retrieval & chat
-- [ ] `POST /chat` — SSE streaming responses
+- [x] `POST /chat` — SSE streaming (sources → deltas → done), stateless
 - [x] Hybrid search: vector (HNSW, cosine) + full-text (websearch_to_tsquery), fused with RRF; exposed as `POST /search` with per-retriever ranks for debuggability
-- [ ] Prompt assembly with retrieved context; citations mapped to chunk IDs
+- [x] Prompt assembly with numbered sources and metadata; [n] citations mapped to chunk IDs via the sources event
 - [ ] Next.js frontend: upload view, chat with streaming, citation panel
 
 ## Phase 3 — Users & history

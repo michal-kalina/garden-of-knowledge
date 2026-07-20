@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/chat"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/documents"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/retrieval"
 )
@@ -81,10 +82,28 @@ func newTestServerWithSearch(t *testing.T) (http.Handler, *fakeDocs, *fakeSearch
 		// DB is only used by /readyz, which these tests do not exercise.
 		Documents:      fake,
 		Search:         search,
+		Chat:           &fakeChat{},
 		MaxUploadBytes: 1 << 20, // 1 MiB limit for tests
 		Logger:         logger,
 	})
 	return h, fake, search
+}
+
+// fakeChat emits one sources event and two deltas.
+type fakeChat struct{ fail bool }
+
+func (f *fakeChat) Ask(_ context.Context, question string,
+	onSources func([]chat.Source) error, onDelta func(string) error) error {
+	if err := onSources([]chat.Source{{Index: 1, ChunkID: 42, Filename: "a.md"}}); err != nil {
+		return err
+	}
+	if err := onDelta("Hello "); err != nil {
+		return err
+	}
+	if f.fail {
+		return context.DeadlineExceeded
+	}
+	return onDelta("[1]")
 }
 
 // multipartBody builds a multipart request body with a single "file" part.
@@ -238,6 +257,84 @@ func TestSearch(t *testing.T) {
 	t.Run("rejects malformed JSON with 400", func(t *testing.T) {
 		srv, _, _ := newTestServerWithSearch(t)
 		req := httptest.NewRequest(http.MethodPost, "/search", strings.NewReader(`{`))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", rec.Code)
+		}
+	})
+}
+
+func TestChat(t *testing.T) {
+	newChatServer := func(c ChatService) http.Handler {
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		return New(Deps{
+			Documents:      &fakeDocs{docs: map[string]documents.Document{}},
+			Search:         &fakeSearch{},
+			Chat:           c,
+			MaxUploadBytes: 1 << 20,
+			Logger:         logger,
+		})
+	}
+
+	t.Run("streams sources, deltas and done as SSE", func(t *testing.T) {
+		srv := newChatServer(&fakeChat{})
+		req := httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"query":"hi"}`))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d; body: %s", rec.Code, rec.Body)
+		}
+		if ct := rec.Header().Get("Content-Type"); ct != "text/event-stream" {
+			t.Errorf("content type = %q", ct)
+		}
+		body := rec.Body.String()
+		iSources := strings.Index(body, "event: sources")
+		iDelta := strings.Index(body, "event: delta")
+		iDone := strings.Index(body, "event: done")
+		if iSources == -1 || iDelta == -1 || iDone == -1 {
+			t.Fatalf("missing SSE events; body:\n%s", body)
+		}
+		if !(iSources < iDelta && iDelta < iDone) {
+			t.Errorf("event order wrong; body:\n%s", body)
+		}
+		if !strings.Contains(body, `"chunk_id":42`) {
+			t.Errorf("sources payload missing chunk id; body:\n%s", body)
+		}
+		if !strings.Contains(body, `{"text":"Hello "}`) {
+			t.Errorf("delta payload missing; body:\n%s", body)
+		}
+	})
+
+	t.Run("mid-stream failure arrives as an error event", func(t *testing.T) {
+		srv := newChatServer(&fakeChat{fail: true})
+		req := httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"query":"hi"}`))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		body := rec.Body.String()
+		if !strings.Contains(body, "event: error") {
+			t.Fatalf("no error event; body:\n%s", body)
+		}
+		if strings.Contains(body, "event: done") {
+			t.Errorf("done must not follow an error; body:\n%s", body)
+		}
+	})
+
+	t.Run("returns 503 when chat is unconfigured", func(t *testing.T) {
+		srv := newChatServer(nil)
+		req := httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"query":"hi"}`))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503", rec.Code)
+		}
+	})
+
+	t.Run("rejects empty query with 400", func(t *testing.T) {
+		srv := newChatServer(&fakeChat{})
+		req := httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"query":""}`))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {

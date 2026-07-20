@@ -37,6 +37,8 @@ curl localhost:8080/readyz    # {"status":"ready"}
 
 MinIO console: http://localhost:9001 · Parser API docs: http://localhost:8000/docs
 
+Without `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY` set in `.env`, chat stays disabled (503) and embeddings fall back to a deterministic fake (offline-friendly, but retrieval quality is meaningless). Get a Voyage key at [dash.voyageai.com](https://dash.voyageai.com).
+
 ## Design decisions
 
 Every non-obvious choice is documented as an ADR in [`docs/adr/`](docs/adr/). Highlights:

@@ -11,11 +11,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/chat"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/config"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/database"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/documents"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/embeddings"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/httpserver"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/llm"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/retrieval"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/storage"
 )
@@ -60,12 +62,21 @@ func run(logger *slog.Logger) error {
 	embedder := embeddings.FromProvider(cfg.EmbeddingsProvider, cfg.VoyageAPIKey, logger)
 	searcher := retrieval.New(db, embedder)
 
+	var chatSvc httpserver.ChatService
+	if cfg.AnthropicAPIKey != "" {
+		chatSvc = chat.New(searcher, llm.NewAnthropic(cfg.AnthropicAPIKey, cfg.AnthropicModel))
+		logger.Info("chat enabled", "model", cfg.AnthropicModel)
+	} else {
+		logger.Warn("chat disabled: ANTHROPIC_API_KEY not set")
+	}
+
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpserver.New(httpserver.Deps{
 			DB:             db,
 			Documents:      docs,
 			Search:         searcher,
+			Chat:           chatSvc,
 			MaxUploadBytes: cfg.MaxUploadBytes,
 			Logger:         logger,
 		}),

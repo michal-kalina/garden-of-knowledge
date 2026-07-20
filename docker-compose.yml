@@ -44,6 +44,9 @@ services:
       S3_ACCESS_KEY: ${MINIO_ROOT_USER:-gok}
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-gok_dev_password}
       S3_BUCKET: documents
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
     ports:
       - "8080:8080"
     depends_on:

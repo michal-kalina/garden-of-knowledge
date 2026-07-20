@@ -37,6 +37,11 @@ type Config struct {
 	// "fake" (offline development).
 	EmbeddingsProvider string
 	VoyageAPIKey       string
+
+	// AnthropicAPIKey enables the /chat endpoint; empty leaves chat
+	// unconfigured (503) while the rest of the API works.
+	AnthropicAPIKey string
+	AnthropicModel  string
 }
 
 func Load() (Config, error) {
@@ -70,6 +75,8 @@ func Load() (Config, error) {
 		}
 		cfg.S3UseSSL = b
 	}
+	cfg.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
+	cfg.AnthropicModel = getenvDefault("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 	cfg.VoyageAPIKey = os.Getenv("VOYAGE_API_KEY")
 	cfg.EmbeddingsProvider = os.Getenv("EMBEDDINGS_PROVIDER")
 	if cfg.EmbeddingsProvider == "" {

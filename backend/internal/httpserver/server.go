@@ -13,6 +13,7 @@ type server struct {
 	db             *sql.DB
 	docs           DocumentService
 	search         SearchService
+	chat           ChatService
 	logger         *slog.Logger
 	maxUploadBytes int64
 }
@@ -21,9 +22,12 @@ type server struct {
 // positional parameter list) keeps call sites readable as endpoints
 // accumulate.
 type Deps struct {
-	DB             *sql.DB
-	Documents      DocumentService
-	Search         SearchService
+	DB        *sql.DB
+	Documents DocumentService
+	Search    SearchService
+	// Chat may be nil when ANTHROPIC_API_KEY is not configured; the /chat
+	// endpoint then answers 503 while the rest of the API stays usable.
+	Chat           ChatService
 	MaxUploadBytes int64
 	Logger         *slog.Logger
 }
@@ -34,6 +38,7 @@ func New(d Deps) http.Handler {
 		db:             d.DB,
 		docs:           d.Documents,
 		search:         d.Search,
+		chat:           d.Chat,
 		logger:         d.Logger,
 		maxUploadBytes: d.MaxUploadBytes,
 	}
@@ -61,6 +66,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /documents", s.handleDocumentList)
 	mux.HandleFunc("GET /documents/{id}", s.handleDocumentGet)
 	mux.HandleFunc("POST /search", s.handleSearch)
+	mux.HandleFunc("POST /chat", s.handleChat)
 
 	return logging(d.Logger)(mux)
 }
@@ -96,4 +102,14 @@ type statusWriter struct {
 func (w *statusWriter) WriteHeader(code int) {
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
+}
+
+// Flush forwards to the wrapped writer. Without this, wrapping in the
+// logging middleware would hide the underlying http.Flusher and silently
+// break SSE streaming — the /chat handler's type assertion would fail even
+// though the real connection supports flushing.
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
