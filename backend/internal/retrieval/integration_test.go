@@ -18,6 +18,7 @@ import (
 
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/database"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/embeddings"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/users"
 )
 
 func TestHybridSearchIntegration(t *testing.T) {
@@ -35,7 +36,7 @@ func TestHybridSearchIntegration(t *testing.T) {
 	defer db.Close()
 
 	if _, err := db.ExecContext(ctx,
-		"DROP TABLE IF EXISTS chunks, ingestion_jobs, documents, schema_migrations CASCADE",
+		"DROP TABLE IF EXISTS chunks, ingestion_jobs, documents, users, schema_migrations CASCADE",
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -43,19 +44,30 @@ func TestHybridSearchIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Seed: one ready document with three chunks, one pending document that
-	// must never surface in results.
+	// Two owners: isolation between them is part of what we assert.
+	usersRepo := users.NewRepository(db)
+	alice, err := usersRepo.Create(ctx, "alice@example.com", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := usersRepo.Create(ctx, "bob@example.com", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed: one ready document (alice) with three chunks, one pending
+	// document that must never surface in results.
 	var readyID, pendingID string
 	if err := db.QueryRowContext(ctx, `
-		INSERT INTO documents (filename, content_type, size_bytes, storage_key, status)
-		VALUES ('handbook.md', 'text/markdown', 1, 'k1', 'ready')
-		RETURNING id`).Scan(&readyID); err != nil {
+		INSERT INTO documents (filename, content_type, size_bytes, storage_key, status, user_id)
+		VALUES ('handbook.md', 'text/markdown', 1, 'k1', 'ready', $1)
+		RETURNING id`, alice.ID).Scan(&readyID); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.QueryRowContext(ctx, `
-		INSERT INTO documents (filename, content_type, size_bytes, storage_key, status)
-		VALUES ('draft.md', 'text/markdown', 1, 'k2', 'pending')
-		RETURNING id`).Scan(&pendingID); err != nil {
+		INSERT INTO documents (filename, content_type, size_bytes, storage_key, status, user_id)
+		VALUES ('draft.md', 'text/markdown', 1, 'k2', 'pending', $1)
+		RETURNING id`, alice.ID).Scan(&pendingID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -83,7 +95,7 @@ func TestHybridSearchIntegration(t *testing.T) {
 
 	t.Run("exact-content query wins via the vector retriever", func(t *testing.T) {
 		query := "The zorbafex device requires quarterly maintenance by certified staff."
-		got, err := s.Search(ctx, query, 3)
+		got, err := s.Search(ctx, alice.ID, query, 3)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +111,7 @@ func TestHybridSearchIntegration(t *testing.T) {
 	})
 
 	t.Run("rare term is found by full-text search", func(t *testing.T) {
-		got, err := s.Search(ctx, "zorbafex", 3)
+		got, err := s.Search(ctx, alice.ID, "zorbafex", 3)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -122,7 +134,7 @@ func TestHybridSearchIntegration(t *testing.T) {
 		// ("vacation") — the RRF sum from two lists must beat any chunk
 		// present in only one list.
 		query := "Vacation policy grants twenty six days of paid leave annually."
-		got, err := s.Search(ctx, query, 3)
+		got, err := s.Search(ctx, alice.ID, query, 3)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -137,7 +149,7 @@ func TestHybridSearchIntegration(t *testing.T) {
 	})
 
 	t.Run("non-ready documents are excluded", func(t *testing.T) {
-		got, err := s.Search(ctx, "vacation policy", 10)
+		got, err := s.Search(ctx, alice.ID, "vacation policy", 10)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -148,8 +160,18 @@ func TestHybridSearchIntegration(t *testing.T) {
 		}
 	})
 
+	t.Run("another user's documents are invisible", func(t *testing.T) {
+		got, err := s.Search(ctx, bob.ID, "zorbafex vacation handbook", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("bob sees alice's chunks: %+v", got)
+		}
+	})
+
 	t.Run("limit is applied and capped", func(t *testing.T) {
-		got, err := s.Search(ctx, "the", 1)
+		got, err := s.Search(ctx, alice.ID, "the", 1)
 		if err != nil {
 			t.Fatal(err)
 		}

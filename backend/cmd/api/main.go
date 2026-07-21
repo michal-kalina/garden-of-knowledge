@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/auth"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/chat"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/config"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/database"
@@ -20,6 +21,7 @@ import (
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/llm"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/retrieval"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/storage"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/users"
 )
 
 func main() {
@@ -59,6 +61,8 @@ func run(logger *slog.Logger) error {
 	logger.Info("object storage ready", "bucket", cfg.S3Bucket)
 
 	docs := documents.NewService(store, documents.NewRepository(db))
+	tokens := auth.NewTokens(cfg.AuthSecret, cfg.AuthTokenTTL)
+	userSvc := users.NewService(users.NewRepository(db), tokens)
 	embedder := embeddings.FromProvider(cfg.EmbeddingsProvider, cfg.VoyageAPIKey, cfg.VoyageModel, logger)
 	searcher := retrieval.New(db, embedder)
 
@@ -81,6 +85,8 @@ func run(logger *slog.Logger) error {
 			Documents:      docs,
 			Search:         searcher,
 			Chat:           chatSvc,
+			Users:          userSvc,
+			Verify:         tokens.Verify,
 			MaxUploadBytes: cfg.MaxUploadBytes,
 			Logger:         logger,
 		}),

@@ -55,6 +55,12 @@ type Config struct {
 	LLMModel string
 	// LLMAPIKey is resolved from the provider-specific env var.
 	LLMAPIKey string
+
+	// AuthSecret signs session tokens (HS256). Required — there is no safe
+	// default for a signing key.
+	AuthSecret string
+	// AuthTokenTTL is the session lifetime. Default 7 days.
+	AuthTokenTTL time.Duration
 }
 
 func Load() (Config, error) {
@@ -143,6 +149,18 @@ func Load() (Config, error) {
 		// Explicitly allowed: offline dev without an API key.
 	default:
 		return Config{}, fmt.Errorf("unknown EMBEDDINGS_PROVIDER %q", cfg.EmbeddingsProvider)
+	}
+	cfg.AuthSecret = os.Getenv("AUTH_SECRET")
+	if cfg.AuthSecret == "" {
+		return Config{}, fmt.Errorf("AUTH_SECRET is required (any long random string; signs session tokens)")
+	}
+	cfg.AuthTokenTTL = 7 * 24 * time.Hour
+	if v := os.Getenv("AUTH_TOKEN_TTL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return Config{}, fmt.Errorf("invalid AUTH_TOKEN_TTL %q", v)
+		}
+		cfg.AuthTokenTTL = d
 	}
 	if v := os.Getenv("MAX_UPLOAD_BYTES"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)

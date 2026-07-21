@@ -12,9 +12,9 @@ import (
 // Depending on an interface (not the concrete Service) keeps handlers
 // unit-testable with an in-memory fake — no database or MinIO required.
 type DocumentService interface {
-	Upload(ctx context.Context, in documents.UploadInput) (documents.Document, error)
-	List(ctx context.Context) ([]documents.Document, error)
-	Get(ctx context.Context, id string) (documents.Document, error)
+	Upload(ctx context.Context, userID string, in documents.UploadInput) (documents.Document, error)
+	List(ctx context.Context, userID string) ([]documents.Document, error)
+	Get(ctx context.Context, userID, id string) (documents.Document, error)
 }
 
 // allowedContentTypes is the ingestion allowlist. It grows together with the
@@ -51,7 +51,7 @@ func (s *server) handleDocumentUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	doc, err := s.docs.Upload(r.Context(), documents.UploadInput{
+	doc, err := s.docs.Upload(r.Context(), userIDFrom(r.Context()), documents.UploadInput{
 		Filename:    header.Filename,
 		ContentType: contentType,
 		Size:        header.Size,
@@ -67,7 +67,7 @@ func (s *server) handleDocumentUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleDocumentList(w http.ResponseWriter, r *http.Request) {
-	docs, err := s.docs.List(r.Context())
+	docs, err := s.docs.List(r.Context(), userIDFrom(r.Context()))
 	if err != nil {
 		s.logger.Error("list documents failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list documents")
@@ -77,7 +77,7 @@ func (s *server) handleDocumentList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleDocumentGet(w http.ResponseWriter, r *http.Request) {
-	doc, err := s.docs.Get(r.Context(), r.PathValue("id"))
+	doc, err := s.docs.Get(r.Context(), userIDFrom(r.Context()), r.PathValue("id"))
 	if errors.Is(err, documents.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "document not found")
 		return

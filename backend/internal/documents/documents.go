@@ -43,11 +43,11 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
-// CreateWithJob inserts the document and enqueues its ingestion job in a
-// single transaction. This is the payoff of the Postgres-backed queue
+// CreateWithJob inserts the document (owned by userID) and enqueues its
+// ingestion job in a single transaction. This is the payoff of the Postgres-backed queue
 // (ADR-0002): there is no window where a document exists without a job,
 // so no outbox pattern or reconciliation is needed.
-func (r *Repository) CreateWithJob(ctx context.Context, d Document) (Document, error) {
+func (r *Repository) CreateWithJob(ctx context.Context, userID string, d Document) (Document, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Document{}, err
@@ -55,10 +55,10 @@ func (r *Repository) CreateWithJob(ctx context.Context, d Document) (Document, e
 	defer tx.Rollback() //nolint:errcheck // rollback after commit is a no-op
 
 	err = tx.QueryRowContext(ctx, `
-		INSERT INTO documents (filename, content_type, size_bytes, storage_key)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO documents (filename, content_type, size_bytes, storage_key, user_id)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, status, created_at, updated_at
-	`, d.Filename, d.ContentType, d.SizeBytes, d.StorageKey).
+	`, d.Filename, d.ContentType, d.SizeBytes, d.StorageKey, userID).
 		Scan(&d.ID, &d.Status, &d.CreatedAt, &d.UpdatedAt)
 	if err != nil {
 		return Document{}, fmt.Errorf("insert document: %w", err)
@@ -81,13 +81,14 @@ const docColumns = `id, filename, content_type, size_bytes, storage_key, status,
 
 // List returns the most recent documents. Pagination arrives with the
 // frontend in Phase 2; the cap keeps responses bounded until then.
-func (r *Repository) List(ctx context.Context) ([]Document, error) {
+func (r *Repository) List(ctx context.Context, userID string) ([]Document, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT `+docColumns+`
 		FROM documents
+		WHERE user_id = $1
 		ORDER BY created_at DESC
 		LIMIT 100
-	`)
+	`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -104,15 +105,17 @@ func (r *Repository) List(ctx context.Context) ([]Document, error) {
 	return docs, rows.Err()
 }
 
-func (r *Repository) Get(ctx context.Context, id string) (Document, error) {
+// Get scopes by owner: another user's document id yields ErrNotFound, not a
+// permission error — no confirmation that the id exists at all.
+func (r *Repository) Get(ctx context.Context, userID, id string) (Document, error) {
 	if _, err := uuid.Parse(id); err != nil {
 		return Document{}, ErrNotFound
 	}
 	row := r.db.QueryRowContext(ctx, `
 		SELECT `+docColumns+`
 		FROM documents
-		WHERE id = $1
-	`, id)
+		WHERE id = $1 AND user_id = $2
+	`, id, userID)
 	d, err := scanDocument(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Document{}, ErrNotFound
@@ -154,7 +157,7 @@ type UploadInput struct {
 // object behind — accepted for now; a periodic cleanup job is cheaper and
 // simpler than distributed-transaction gymnastics.
 // TODO(phase-4): sweep orphaned objects.
-func (s *Service) Upload(ctx context.Context, in UploadInput) (Document, error) {
+func (s *Service) Upload(ctx context.Context, userID string, in UploadInput) (Document, error) {
 	// The storage key is content-independent and unguessable; the original
 	// filename lives only in the database (S3 keys have their own character
 	// rules, so user input never becomes a key).
@@ -164,7 +167,7 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (Document, error) 
 		return Document{}, fmt.Errorf("store upload: %w", err)
 	}
 
-	return s.repo.CreateWithJob(ctx, Document{
+	return s.repo.CreateWithJob(ctx, userID, Document{
 		Filename:    in.Filename,
 		ContentType: in.ContentType,
 		SizeBytes:   in.Size,
@@ -172,10 +175,10 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (Document, error) 
 	})
 }
 
-func (s *Service) List(ctx context.Context) ([]Document, error) {
-	return s.repo.List(ctx)
+func (s *Service) List(ctx context.Context, userID string) ([]Document, error) {
+	return s.repo.List(ctx, userID)
 }
 
-func (s *Service) Get(ctx context.Context, id string) (Document, error) {
-	return s.repo.Get(ctx, id)
+func (s *Service) Get(ctx context.Context, userID, id string) (Document, error) {
+	return s.repo.Get(ctx, userID, id)
 }

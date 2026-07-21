@@ -1,6 +1,55 @@
 // API client for the Go backend, reached through the /backend/* rewrite
 // (see next.config.mjs) so the browser never deals with CORS.
 
+import { clearSession, getToken } from "@/lib/auth";
+
+export interface User {
+  id: string;
+  email: string;
+}
+
+interface Session {
+  token: string;
+  user: User;
+}
+
+async function credentials(
+  path: "register" | "login",
+  email: string,
+  password: string,
+): Promise<Session> {
+  const res = await fetch(`/backend/auth/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  const body = (await res.json().catch(() => null)) as
+    | (Session & { error?: string })
+    | null;
+  if (!res.ok) throw new Error(body?.error ?? `${path} failed (${res.status})`);
+  return body as Session;
+}
+
+export const register = (email: string, password: string) =>
+  credentials("register", email, password);
+export const login = (email: string, password: string) =>
+  credentials("login", email, password);
+
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+// checkSession centralizes 401 handling: an expired or revoked token drops
+// the session and sends the user back to the sign-in screen.
+function checkSession(res: Response): Response {
+  if (res.status === 401 && getToken()) {
+    clearSession();
+    window.location.reload();
+  }
+  return res;
+}
+
 export type DocumentStatus = "pending" | "processing" | "ready" | "failed";
 
 export interface Doc {
@@ -26,7 +75,7 @@ export interface Source {
 }
 
 export async function listDocuments(): Promise<Doc[]> {
-  const res = await fetch("/backend/documents");
+  const res = checkSession(await fetch("/backend/documents", { headers: authHeaders() }));
   if (!res.ok) throw new Error(`listing documents failed (${res.status})`);
   const body = (await res.json()) as { documents: Doc[] };
   return body.documents;
@@ -35,7 +84,13 @@ export async function listDocuments(): Promise<Doc[]> {
 export async function uploadDocument(file: File): Promise<Doc> {
   const form = new FormData();
   form.append("file", file, file.name);
-  const res = await fetch("/backend/documents", { method: "POST", body: form });
+  const res = checkSession(
+    await fetch("/backend/documents", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(),
+    }),
+  );
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
     throw new Error(body?.error ?? `upload failed (${res.status})`);
@@ -57,12 +112,14 @@ export async function streamChat(
   handlers: ChatHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  const res = await fetch("/backend/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
-    signal,
-  });
+  const res = checkSession(
+    await fetch("/backend/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ query }),
+      signal,
+    }),
+  );
   if (!res.ok || !res.body) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
     throw new Error(body?.error ?? `chat failed (${res.status})`);

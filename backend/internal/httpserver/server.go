@@ -14,6 +14,8 @@ type server struct {
 	docs           DocumentService
 	search         SearchService
 	chat           ChatService
+	users          UserService
+	verify         TokenVerifier
 	logger         *slog.Logger
 	maxUploadBytes int64
 }
@@ -28,6 +30,8 @@ type Deps struct {
 	// Chat may be nil when ANTHROPIC_API_KEY is not configured; the /chat
 	// endpoint then answers 503 while the rest of the API stays usable.
 	Chat           ChatService
+	Users          UserService
+	Verify         TokenVerifier
 	MaxUploadBytes int64
 	Logger         *slog.Logger
 }
@@ -39,6 +43,8 @@ func New(d Deps) http.Handler {
 		docs:           d.Documents,
 		search:         d.Search,
 		chat:           d.Chat,
+		users:          d.Users,
+		verify:         d.Verify,
 		logger:         d.Logger,
 		maxUploadBytes: d.MaxUploadBytes,
 	}
@@ -62,11 +68,15 @@ func New(d Deps) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
 
-	mux.HandleFunc("POST /documents", s.handleDocumentUpload)
-	mux.HandleFunc("GET /documents", s.handleDocumentList)
-	mux.HandleFunc("GET /documents/{id}", s.handleDocumentGet)
-	mux.HandleFunc("POST /search", s.handleSearch)
-	mux.HandleFunc("POST /chat", s.handleChat)
+	mux.HandleFunc("POST /auth/register", s.handleRegister)
+	mux.HandleFunc("POST /auth/login", s.handleLogin)
+
+	// Everything touching documents or retrieval is per-user.
+	mux.HandleFunc("POST /documents", s.requireAuth(s.handleDocumentUpload))
+	mux.HandleFunc("GET /documents", s.requireAuth(s.handleDocumentList))
+	mux.HandleFunc("GET /documents/{id}", s.requireAuth(s.handleDocumentGet))
+	mux.HandleFunc("POST /search", s.requireAuth(s.handleSearch))
+	mux.HandleFunc("POST /chat", s.requireAuth(s.handleChat))
 
 	return logging(d.Logger)(mux)
 }

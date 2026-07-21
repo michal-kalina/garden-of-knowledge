@@ -7,6 +7,7 @@ import (
 
 func TestLoad(t *testing.T) {
 	t.Run("requires DATABASE_URL", func(t *testing.T) {
+		t.Setenv("AUTH_SECRET", "test-secret")
 		t.Setenv("DATABASE_URL", "")
 		if _, err := Load(); err == nil {
 			t.Fatal("expected error when DATABASE_URL is empty")
@@ -15,6 +16,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("applies defaults", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "test-secret")
 		t.Setenv("HTTP_ADDR", "")
 		cfg, err := Load()
 		if err != nil {
@@ -36,6 +38,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("parses poll interval", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "test-secret")
 		t.Setenv("WORKER_POLL_INTERVAL", "500ms")
 		cfg, err := Load()
 		if err != nil {
@@ -48,6 +51,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("rejects invalid poll interval", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "test-secret")
 		t.Setenv("WORKER_POLL_INTERVAL", "banana")
 		if _, err := Load(); err == nil {
 			t.Fatal("expected error for invalid duration")
@@ -56,6 +60,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("parses S3 and upload settings", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "test-secret")
 		t.Setenv("S3_USE_SSL", "true")
 		t.Setenv("MAX_UPLOAD_BYTES", "1024")
 		cfg, err := Load()
@@ -72,6 +77,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("embeddings provider defaults", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "test-secret")
 		t.Setenv("EMBEDDINGS_PROVIDER", "")
 		t.Setenv("VOYAGE_API_KEY", "")
 		cfg, err := Load()
@@ -94,6 +100,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("voyage provider requires a key", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "test-secret")
 		t.Setenv("EMBEDDINGS_PROVIDER", "voyage")
 		t.Setenv("VOYAGE_API_KEY", "")
 		if _, err := Load(); err == nil {
@@ -103,6 +110,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("rejects unknown embeddings provider", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "test-secret")
 		t.Setenv("EMBEDDINGS_PROVIDER", "quantum")
 		if _, err := Load(); err == nil {
 			t.Fatal("expected error")
@@ -111,6 +119,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("llm provider is inferred from keys", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "test-secret")
 		t.Setenv("LLM_PROVIDER", "")
 		t.Setenv("LLM_MODEL", "")
 		t.Setenv("ANTHROPIC_API_KEY", "")
@@ -147,6 +156,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("openrouter requires an explicit model", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "test-secret")
 		t.Setenv("OPENROUTER_API_KEY", "ok")
 		t.Setenv("LLM_PROVIDER", "openrouter")
 		t.Setenv("LLM_MODEL", "")
@@ -157,6 +167,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("explicit provider without its key errors", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "test-secret")
 		t.Setenv("LLM_PROVIDER", "anthropic")
 		t.Setenv("ANTHROPIC_API_KEY", "")
 		if _, err := Load(); err == nil {
@@ -166,6 +177,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("voyage model defaults to voyage-4", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "test-secret")
 		t.Setenv("VOYAGE_MODEL", "")
 		cfg, err := Load()
 		if err != nil {
@@ -178,9 +190,37 @@ func TestLoad(t *testing.T) {
 
 	t.Run("rejects invalid MAX_UPLOAD_BYTES", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "test-secret")
 		t.Setenv("MAX_UPLOAD_BYTES", "-1")
 		if _, err := Load(); err == nil {
 			t.Fatal("expected error for negative limit")
+		}
+	})
+}
+
+func TestAuthConfig(t *testing.T) {
+	t.Run("requires AUTH_SECRET", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected error without AUTH_SECRET")
+		}
+	})
+
+	t.Run("token ttl default and override", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "s")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.AuthTokenTTL != 7*24*time.Hour {
+			t.Errorf("ttl = %v", cfg.AuthTokenTTL)
+		}
+		t.Setenv("AUTH_TOKEN_TTL", "1h")
+		cfg, _ = Load()
+		if cfg.AuthTokenTTL != time.Hour {
+			t.Errorf("ttl override = %v", cfg.AuthTokenTTL)
 		}
 	})
 }

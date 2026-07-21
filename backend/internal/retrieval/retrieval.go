@@ -75,8 +75,11 @@ func New(db *sql.DB, embedder embeddings.Embedder) *Searcher {
 	return &Searcher{db: db, embedder: embedder}
 }
 
-// Search embeds the query, runs both retrievers and fuses their rankings.
-func (s *Searcher) Search(ctx context.Context, query string, limit int) ([]Result, error) {
+// Search embeds the query, runs both retrievers over the user's documents
+// and fuses their rankings. Tenancy lives in SQL, not post-filtering: a
+// candidate list fetched globally and filtered afterwards could end up
+// empty for a user whose documents rank below others'.
+func (s *Searcher) Search(ctx context.Context, userID, query string, limit int) ([]Result, error) {
 	if limit <= 0 {
 		limit = DefaultLimit
 	}
@@ -93,7 +96,7 @@ func (s *Searcher) Search(ctx context.Context, query string, limit int) ([]Resul
 
 	byID := map[int64]*Result{}
 
-	vectorRows, err := s.vectorSearch(ctx, database.VectorLiteral(vecs[0]))
+	vectorRows, err := s.vectorSearch(ctx, userID, database.VectorLiteral(vecs[0]))
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
 	}
@@ -103,7 +106,7 @@ func (s *Searcher) Search(ctx context.Context, query string, limit int) ([]Resul
 		res.Score += 1.0 / float64(rrfK+rank+1)
 	}
 
-	textRows, err := s.textSearch(ctx, query)
+	textRows, err := s.textSearch(ctx, userID, query)
 	if err != nil {
 		return nil, fmt.Errorf("text search: %w", err)
 	}
@@ -142,15 +145,15 @@ const resultColumns = `
 	c.id, c.document_id, d.filename, c.ordinal, c.content, c.heading,
 	c.page_start, c.page_end`
 
-func (s *Searcher) vectorSearch(ctx context.Context, queryVec string) ([]Result, error) {
+func (s *Searcher) vectorSearch(ctx context.Context, userID, queryVec string) ([]Result, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+resultColumns+`
 		FROM chunks c
 		JOIN documents d ON d.id = c.document_id
-		WHERE c.embedding IS NOT NULL AND d.status = 'ready'
+		WHERE c.embedding IS NOT NULL AND d.status = 'ready' AND d.user_id = $3
 		ORDER BY c.embedding <=> $1::vector
 		LIMIT $2
-	`, queryVec, candidateLimit)
+	`, queryVec, candidateLimit, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +161,7 @@ func (s *Searcher) vectorSearch(ctx context.Context, queryVec string) ([]Result,
 	return scanResults(rows)
 }
 
-func (s *Searcher) textSearch(ctx context.Context, query string) ([]Result, error) {
+func (s *Searcher) textSearch(ctx context.Context, userID, query string) ([]Result, error) {
 	// websearch_to_tsquery accepts raw user input safely (quotes, OR, -).
 	// The 'simple' configuration must match the one used for the generated
 	// tsv column in migration 0001 — mixed configurations silently return
@@ -172,10 +175,10 @@ func (s *Searcher) textSearch(ctx context.Context, query string) ([]Result, erro
 		FROM chunks c
 		JOIN documents d ON d.id = c.document_id,
 		     websearch_to_tsquery('simple', $1) q
-		WHERE c.tsv @@ q AND d.status = 'ready'
+		WHERE c.tsv @@ q AND d.status = 'ready' AND d.user_id = $3
 		ORDER BY ts_rank(c.tsv, q) DESC, c.id
 		LIMIT $2
-	`, query, candidateLimit)
+	`, query, candidateLimit, userID)
 	if err != nil {
 		return nil, err
 	}

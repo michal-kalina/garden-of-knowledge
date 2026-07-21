@@ -29,7 +29,7 @@
 - [x] Next.js frontend (Tailwind + shadcn-style components): upload with live statuses, streaming chat, [n] citations flashing their source card
 
 ## Phase 3 — Users & history
-- [ ] JWT auth, per-user document isolation
+- [x] Auth (register/login, HS256 session tokens, PBKDF2-hashed passwords with RFC test vectors) and per-user isolation of documents, search and chat — enforced in SQL, verified by an integration test
 - [ ] Persisted conversations
 
 ## Phase 4 — Quality & observability

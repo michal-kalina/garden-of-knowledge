@@ -50,6 +50,7 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-}
       LLM_MODEL: ${LLM_MODEL:-}
+      AUTH_SECRET: ${AUTH_SECRET:-dev_only_secret_change_me}
     ports:
       - "8080:8080"
     depends_on:
@@ -71,6 +72,7 @@ services:
       S3_BUCKET: documents
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
       VOYAGE_MODEL: ${VOYAGE_MODEL:-}
+      AUTH_SECRET: ${AUTH_SECRET:-dev_only_secret_change_me}
     depends_on:
       postgres:
         condition: service_healthy

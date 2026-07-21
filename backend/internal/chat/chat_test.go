@@ -14,7 +14,7 @@ type fakeRetriever struct {
 	query   string
 }
 
-func (f *fakeRetriever) Search(_ context.Context, query string, _ int) ([]retrieval.Result, error) {
+func (f *fakeRetriever) Search(_ context.Context, _ string, query string, _ int) ([]retrieval.Result, error) {
 	f.query = query
 	return f.results, nil
 }
@@ -53,7 +53,7 @@ func TestAsk(t *testing.T) {
 
 		var gotSources []Source
 		var streamed strings.Builder
-		err := svc.Ask(context.Background(), "how many vacation days?",
+		err := svc.Ask(context.Background(), "user-1", "how many vacation days?",
 			func(s []Source) error { gotSources = s; return nil },
 			func(d string) error { streamed.WriteString(d); return nil })
 		if err != nil {
@@ -92,7 +92,7 @@ func TestAsk(t *testing.T) {
 
 		var sources []Source
 		var streamed strings.Builder
-		err := svc.Ask(context.Background(), "anything",
+		err := svc.Ask(context.Background(), "user-1", "anything",
 			func(s []Source) error { sources = s; return nil },
 			func(d string) error { streamed.WriteString(d); return nil })
 		if err != nil {

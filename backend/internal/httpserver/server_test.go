@@ -16,6 +16,7 @@ import (
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/chat"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/documents"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/retrieval"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/users"
 )
 
 // fakeDocs is an in-memory DocumentService used to test handlers in isolation.
@@ -23,7 +24,7 @@ type fakeDocs struct {
 	docs map[string]documents.Document
 }
 
-func (f *fakeDocs) Upload(_ context.Context, in documents.UploadInput) (documents.Document, error) {
+func (f *fakeDocs) Upload(_ context.Context, _ string, in documents.UploadInput) (documents.Document, error) {
 	// Drain the reader like the real service would.
 	if _, err := io.Copy(io.Discard, in.Content); err != nil {
 		return documents.Document{}, err
@@ -39,7 +40,7 @@ func (f *fakeDocs) Upload(_ context.Context, in documents.UploadInput) (document
 	return d, nil
 }
 
-func (f *fakeDocs) List(context.Context) ([]documents.Document, error) {
+func (f *fakeDocs) List(context.Context, string) ([]documents.Document, error) {
 	out := []documents.Document{}
 	for _, d := range f.docs {
 		out = append(out, d)
@@ -47,7 +48,7 @@ func (f *fakeDocs) List(context.Context) ([]documents.Document, error) {
 	return out, nil
 }
 
-func (f *fakeDocs) Get(_ context.Context, id string) (documents.Document, error) {
+func (f *fakeDocs) Get(_ context.Context, _ string, id string) (documents.Document, error) {
 	d, ok := f.docs[id]
 	if !ok {
 		return documents.Document{}, documents.ErrNotFound
@@ -62,7 +63,7 @@ type fakeSearch struct {
 	results   []retrieval.Result
 }
 
-func (f *fakeSearch) Search(_ context.Context, query string, limit int) ([]retrieval.Result, error) {
+func (f *fakeSearch) Search(_ context.Context, _ string, query string, limit int) ([]retrieval.Result, error) {
 	f.lastQuery, f.lastLimit = query, limit
 	return f.results, nil
 }
@@ -83,6 +84,7 @@ func newTestServerWithSearch(t *testing.T) (http.Handler, *fakeDocs, *fakeSearch
 		Documents:      fake,
 		Search:         search,
 		Chat:           &fakeChat{},
+		Verify:         func(string) (string, error) { return "test-user", nil },
 		MaxUploadBytes: 1 << 20, // 1 MiB limit for tests
 		Logger:         logger,
 	})
@@ -92,7 +94,7 @@ func newTestServerWithSearch(t *testing.T) (http.Handler, *fakeDocs, *fakeSearch
 // fakeChat emits one sources event and two deltas.
 type fakeChat struct{ fail bool }
 
-func (f *fakeChat) Ask(_ context.Context, question string,
+func (f *fakeChat) Ask(_ context.Context, _ string, question string,
 	onSources func([]chat.Source) error, onDelta func(string) error) error {
 	if err := onSources([]chat.Source{{Index: 1, ChunkID: 42, Filename: "a.md"}}); err != nil {
 		return err
@@ -131,7 +133,7 @@ func TestDocumentUpload(t *testing.T) {
 	t.Run("accepts markdown and returns 201", func(t *testing.T) {
 		srv, _ := newTestServer(t)
 		body, ct := multipartBody(t, "notes.md", "text/markdown", "# hello")
-		req := httptest.NewRequest(http.MethodPost, "/documents", body)
+		req := authed(httptest.NewRequest(http.MethodPost, "/documents", body))
 		req.Header.Set("Content-Type", ct)
 		rec := httptest.NewRecorder()
 
@@ -152,7 +154,7 @@ func TestDocumentUpload(t *testing.T) {
 	t.Run("rejects unsupported content type with 415", func(t *testing.T) {
 		srv, _ := newTestServer(t)
 		body, ct := multipartBody(t, "cat.gif", "image/gif", "GIF89a")
-		req := httptest.NewRequest(http.MethodPost, "/documents", body)
+		req := authed(httptest.NewRequest(http.MethodPost, "/documents", body))
 		req.Header.Set("Content-Type", ct)
 		rec := httptest.NewRecorder()
 
@@ -167,7 +169,7 @@ func TestDocumentUpload(t *testing.T) {
 		srv, _ := newTestServer(t)
 		big := strings.Repeat("x", 2<<20) // 2 MiB > 1 MiB test limit
 		body, ct := multipartBody(t, "big.txt", "text/plain", big)
-		req := httptest.NewRequest(http.MethodPost, "/documents", body)
+		req := authed(httptest.NewRequest(http.MethodPost, "/documents", body))
 		req.Header.Set("Content-Type", ct)
 		rec := httptest.NewRecorder()
 
@@ -180,7 +182,7 @@ func TestDocumentUpload(t *testing.T) {
 
 	t.Run("rejects missing file field with 400", func(t *testing.T) {
 		srv, _ := newTestServer(t)
-		req := httptest.NewRequest(http.MethodPost, "/documents", strings.NewReader("nope"))
+		req := authed(httptest.NewRequest(http.MethodPost, "/documents", strings.NewReader("nope")))
 		req.Header.Set("Content-Type", "multipart/form-data; boundary=xyz")
 		rec := httptest.NewRecorder()
 
@@ -199,7 +201,7 @@ func TestDocumentGet(t *testing.T) {
 	}
 
 	t.Run("returns document", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/documents/11111111-1111-1111-1111-111111111111", nil)
+		req := authed(httptest.NewRequest(http.MethodGet, "/documents/11111111-1111-1111-1111-111111111111", nil))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -208,7 +210,7 @@ func TestDocumentGet(t *testing.T) {
 	})
 
 	t.Run("returns 404 for unknown id", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/documents/22222222-2222-2222-2222-222222222222", nil)
+		req := authed(httptest.NewRequest(http.MethodGet, "/documents/22222222-2222-2222-2222-222222222222", nil))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 		if rec.Code != http.StatusNotFound {
@@ -222,8 +224,8 @@ func TestSearch(t *testing.T) {
 		srv, _, search := newTestServerWithSearch(t)
 		search.results = []retrieval.Result{{ChunkID: 7, Content: "hit", Score: 0.03}}
 
-		req := httptest.NewRequest(http.MethodPost, "/search",
-			strings.NewReader(`{"query":"vacation days","limit":5}`))
+		req := authed(httptest.NewRequest(http.MethodPost, "/search",
+			strings.NewReader(`{"query":"vacation days","limit":5}`)))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 
@@ -246,7 +248,7 @@ func TestSearch(t *testing.T) {
 
 	t.Run("rejects empty query with 400", func(t *testing.T) {
 		srv, _, _ := newTestServerWithSearch(t)
-		req := httptest.NewRequest(http.MethodPost, "/search", strings.NewReader(`{"query":"  "}`))
+		req := authed(httptest.NewRequest(http.MethodPost, "/search", strings.NewReader(`{"query":"  "}`)))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
@@ -256,7 +258,7 @@ func TestSearch(t *testing.T) {
 
 	t.Run("rejects malformed JSON with 400", func(t *testing.T) {
 		srv, _, _ := newTestServerWithSearch(t)
-		req := httptest.NewRequest(http.MethodPost, "/search", strings.NewReader(`{`))
+		req := authed(httptest.NewRequest(http.MethodPost, "/search", strings.NewReader(`{`)))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
@@ -272,6 +274,7 @@ func TestChat(t *testing.T) {
 			Documents:      &fakeDocs{docs: map[string]documents.Document{}},
 			Search:         &fakeSearch{},
 			Chat:           c,
+			Verify:         func(string) (string, error) { return "test-user", nil },
 			MaxUploadBytes: 1 << 20,
 			Logger:         logger,
 		})
@@ -279,7 +282,7 @@ func TestChat(t *testing.T) {
 
 	t.Run("streams sources, deltas and done as SSE", func(t *testing.T) {
 		srv := newChatServer(&fakeChat{})
-		req := httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"query":"hi"}`))
+		req := authed(httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"query":"hi"}`)))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 
@@ -309,7 +312,7 @@ func TestChat(t *testing.T) {
 
 	t.Run("mid-stream failure arrives as an error event", func(t *testing.T) {
 		srv := newChatServer(&fakeChat{fail: true})
-		req := httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"query":"hi"}`))
+		req := authed(httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"query":"hi"}`)))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 
@@ -324,7 +327,7 @@ func TestChat(t *testing.T) {
 
 	t.Run("returns 503 when chat is unconfigured", func(t *testing.T) {
 		srv := newChatServer(nil)
-		req := httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"query":"hi"}`))
+		req := authed(httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"query":"hi"}`)))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 		if rec.Code != http.StatusServiceUnavailable {
@@ -334,11 +337,102 @@ func TestChat(t *testing.T) {
 
 	t.Run("rejects empty query with 400", func(t *testing.T) {
 		srv := newChatServer(&fakeChat{})
-		req := httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"query":""}`))
+		req := authed(httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"query":""}`)))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want 400", rec.Code)
+		}
+	})
+}
+
+// authed attaches a Bearer token accepted by the test verifier.
+func authed(req *http.Request) *http.Request {
+	req.Header.Set("Authorization", "Bearer test-token")
+	return req
+}
+
+type fakeUsers struct{ err error }
+
+func (f *fakeUsers) Register(_ context.Context, email, _ string) (users.User, string, error) {
+	if f.err != nil {
+		return users.User{}, "", f.err
+	}
+	return users.User{ID: "u1", Email: email}, "tok", nil
+}
+func (f *fakeUsers) Login(_ context.Context, email, _ string) (users.User, string, error) {
+	if f.err != nil {
+		return users.User{}, "", f.err
+	}
+	return users.User{ID: "u1", Email: email}, "tok", nil
+}
+
+func TestAuth(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	newServer := func(u UserService) http.Handler {
+		return New(Deps{
+			Documents: &fakeDocs{docs: map[string]documents.Document{}},
+			Search:    &fakeSearch{},
+			Users:     u,
+			Verify: func(tok string) (string, error) {
+				if tok == "test-token" {
+					return "test-user", nil
+				}
+				return "", users.ErrInvalidCredentials
+			},
+			MaxUploadBytes: 1 << 20,
+			Logger:         logger,
+		})
+	}
+
+	t.Run("register returns token", func(t *testing.T) {
+		srv := newServer(&fakeUsers{})
+		req := httptest.NewRequest(http.MethodPost, "/auth/register",
+			strings.NewReader(`{"email":"a@b.c","password":"longenough"}`))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status = %d; body: %s", rec.Code, rec.Body)
+		}
+		if !strings.Contains(rec.Body.String(), `"token":"tok"`) {
+			t.Errorf("body = %s", rec.Body)
+		}
+	})
+
+	t.Run("duplicate email yields 409", func(t *testing.T) {
+		srv := newServer(&fakeUsers{err: users.ErrEmailTaken})
+		req := httptest.NewRequest(http.MethodPost, "/auth/register",
+			strings.NewReader(`{"email":"a@b.c","password":"longenough"}`))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status = %d", rec.Code)
+		}
+	})
+
+	t.Run("bad login yields 401", func(t *testing.T) {
+		srv := newServer(&fakeUsers{err: users.ErrInvalidCredentials})
+		req := httptest.NewRequest(http.MethodPost, "/auth/login",
+			strings.NewReader(`{"email":"a@b.c","password":"nope"}`))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d", rec.Code)
+		}
+	})
+
+	t.Run("protected routes reject missing and bad tokens", func(t *testing.T) {
+		srv := newServer(&fakeUsers{})
+		for _, header := range []string{"", "Bearer wrong", "NotBearer test-token"} {
+			req := httptest.NewRequest(http.MethodGet, "/documents", nil)
+			if header != "" {
+				req.Header.Set("Authorization", header)
+			}
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("header %q: status = %d, want 401", header, rec.Code)
+			}
 		}
 	})
 }

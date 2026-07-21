@@ -24,6 +24,7 @@ import (
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/database"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/documents"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/embeddings"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/users"
 )
 
 // memStore is an in-memory ObjectStore.
@@ -99,7 +100,7 @@ func TestPipelineIntegration(t *testing.T) {
 
 	// Start from a clean slate so the test is rerunnable.
 	for _, stmt := range []string{
-		"DROP TABLE IF EXISTS chunks, ingestion_jobs, documents, schema_migrations CASCADE",
+		"DROP TABLE IF EXISTS chunks, ingestion_jobs, documents, users, schema_migrations CASCADE",
 	} {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			t.Fatal(err)
@@ -118,8 +119,13 @@ func TestPipelineIntegration(t *testing.T) {
 	repo := documents.NewRepository(db)
 	svc := documents.NewService(store, repo)
 
+	owner, err := users.NewRepository(db).Create(ctx, "worker-test@example.com", "not-a-real-hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	content := "# Terms\n\nAlpha beta gamma.\n\n# Fees\n\nDelta epsilon zeta."
-	doc, err := svc.Upload(ctx, documents.UploadInput{
+	doc, err := svc.Upload(ctx, owner.ID, documents.UploadInput{
 		Filename:    "contract.md",
 		ContentType: "text/markdown",
 		Size:        int64(len(content)),
@@ -149,7 +155,7 @@ func TestPipelineIntegration(t *testing.T) {
 		t.Fatal("ProcessOne found no job")
 	}
 
-	got, err := repo.Get(ctx, doc.ID)
+	got, err := repo.Get(ctx, owner.ID, doc.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +202,7 @@ func TestPipelineIntegration(t *testing.T) {
 			Logger:   logger,
 		}
 
-		doc2, err := svc.Upload(ctx, documents.UploadInput{
+		doc2, err := svc.Upload(ctx, owner.ID, documents.UploadInput{
 			Filename:    "second.md",
 			ContentType: "text/markdown",
 			Size:        5,
@@ -210,7 +216,7 @@ func TestPipelineIntegration(t *testing.T) {
 		if _, err := procRetry.ProcessOne(ctx); err != nil {
 			t.Fatal(err)
 		}
-		mid, _ := repo.Get(ctx, doc2.ID)
+		mid, _ := repo.Get(ctx, owner.ID, doc2.ID)
 		if mid.Status != "pending" {
 			t.Fatalf("status after failed attempt = %q, want pending", mid.Status)
 		}
@@ -228,7 +234,7 @@ func TestPipelineIntegration(t *testing.T) {
 		if _, err := procRetry.ProcessOne(ctx); err != nil {
 			t.Fatal(err)
 		}
-		final, _ := repo.Get(ctx, doc2.ID)
+		final, _ := repo.Get(ctx, owner.ID, doc2.ID)
 		if final.Status != "ready" {
 			t.Fatalf("status after retry = %q (error: %v), want ready", final.Status, final.Error)
 		}

@@ -11,7 +11,7 @@ import (
 
 // SearchService is what the HTTP layer needs from retrieval.
 type SearchService interface {
-	Search(ctx context.Context, query string, limit int) ([]retrieval.Result, error)
+	Search(ctx context.Context, userID, query string, limit int) ([]retrieval.Result, error)
 }
 
 type searchRequest struct {
@@ -34,7 +34,7 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, err := s.search.Search(r.Context(), req.Query, req.Limit)
+	results, err := s.search.Search(r.Context(), userIDFrom(r.Context()), req.Query, req.Limit)
 	if err != nil {
 		s.logger.Error("search failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "search failed")

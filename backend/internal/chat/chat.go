@@ -15,7 +15,7 @@ import (
 
 // Retriever is what chat needs from the retrieval layer.
 type Retriever interface {
-	Search(ctx context.Context, query string, limit int) ([]retrieval.Result, error)
+	Search(ctx context.Context, userID, query string, limit int) ([]retrieval.Result, error)
 }
 
 // Source is a context chunk as presented to both the model and the client.
@@ -68,10 +68,10 @@ const noSourcesReply = "I could not find anything in the knowledge base related 
 // Ask runs the full flow. onSources fires once, before generation starts,
 // so the client can render the citation panel while text is still
 // streaming; onDelta fires per text fragment.
-func (s *Service) Ask(ctx context.Context, question string,
+func (s *Service) Ask(ctx context.Context, userID, question string,
 	onSources func([]Source) error, onDelta func(string) error) error {
 
-	results, err := s.retriever.Search(ctx, question, s.contextLimit)
+	results, err := s.retriever.Search(ctx, userID, question, s.contextLimit)
 	if err != nil {
 		return fmt.Errorf("retrieve: %w", err)
 	}

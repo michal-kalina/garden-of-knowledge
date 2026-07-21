@@ -1,10 +1,11 @@
 "use client";
 
 import React from "react";
-import { Sprout, Upload } from "lucide-react";
+import { LogOut, Sprout, Upload } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { listDocuments, uploadDocument, type Doc } from "@/lib/api";
+import { clearSession, getEmail } from "@/lib/auth";
 
 const ACCEPT = ".pdf,.md,.txt,application/pdf,text/markdown,text/plain";
 
@@ -12,7 +13,7 @@ function statusVariant(s: Doc["status"]) {
   return s; // badge variants share the status vocabulary
 }
 
-export function DocumentsPanel() {
+export function DocumentsPanel({ onLogout }: { onLogout: () => void }) {
   const [docs, setDocs] = React.useState<Doc[]>([]);
   const [error, setError] = React.useState<string | null>(null);
   const [uploading, setUploading] = React.useState(false);
@@ -91,7 +92,7 @@ export function DocumentsPanel() {
         )}
       </div>
 
-      <div className="mt-5 min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+      <div className="mt-5 min-h-0 flex-1 overflow-y-auto px-2">
         {docs.length === 0 ? (
           <p className="px-2 text-xs leading-relaxed text-sidebar-muted">
             No documents yet. Upload a file to grow the knowledge base — questions
@@ -125,6 +126,22 @@ export function DocumentsPanel() {
           </ul>
         )}
       </div>
+      <footer className="flex items-center justify-between gap-2 border-t border-sidebar-foreground/10 px-4 py-3">
+        <span className="truncate font-mono text-[0.68rem] text-sidebar-muted" title={getEmail() ?? undefined}>
+          {getEmail()}
+        </span>
+        <button
+          type="button"
+          className="flex shrink-0 items-center gap-1 font-mono text-[0.68rem] uppercase tracking-wide text-sidebar-muted transition-colors hover:text-sidebar-foreground"
+          onClick={() => {
+            clearSession();
+            onLogout();
+          }}
+        >
+          <LogOut className="h-3 w-3" aria-hidden />
+          Sign out
+        </button>
+      </footer>
     </aside>
   );
 }

@@ -11,7 +11,7 @@ import (
 
 // ChatService is what the HTTP layer needs from the chat orchestration.
 type ChatService interface {
-	Ask(ctx context.Context, question string,
+	Ask(ctx context.Context, userID, question string,
 		onSources func([]chat.Source) error, onDelta func(string) error) error
 }
 
@@ -70,7 +70,7 @@ func (s *server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return nil
 	}
 
-	err := s.chat.Ask(r.Context(), req.Query,
+	err := s.chat.Ask(r.Context(), userIDFrom(r.Context()), req.Query,
 		func(sources []chat.Source) error { return send("sources", sources) },
 		func(text string) error { return send("delta", map[string]string{"text": text}) },
 	)
