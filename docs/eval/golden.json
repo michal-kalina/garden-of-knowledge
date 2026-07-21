@@ -1,0 +1,139 @@
+{
+  "corpus_note": "Ingest README.md and every file in docs/adr/ under the evaluation account before running `make eval-retrieval`. Judgments below are (filename, heading) pairs — matched against a chunk's stored heading and its document's filename, so the eval survives re-chunking as long as the heading text itself is unchanged.",
+  "cases": [
+    {
+      "id": "vectorstore-choice",
+      "query": "Why does this project use pgvector instead of a separate vector database?",
+      "relevant": [
+        {"filename": "README.md", "heading": "Design decisions"},
+        {"filename": "0001-postgres-pgvector.md", "heading": "Decision"}
+      ]
+    },
+    {
+      "id": "vectorstore-swap",
+      "query": "Could this project switch from pgvector to Qdrant later?",
+      "relevant": [
+        {"filename": "0001-postgres-pgvector.md", "heading": "Consequences"},
+        {"filename": "README.md", "heading": "Design decisions"}
+      ]
+    },
+    {
+      "id": "no-message-broker",
+      "query": "Why doesn't this project use a message broker like RabbitMQ or Kafka for ingestion?",
+      "relevant": [
+        {"filename": "0002-postgres-job-queue.md", "heading": "Decision"},
+        {"filename": "0002-postgres-job-queue.md", "heading": "Context"}
+      ]
+    },
+    {
+      "id": "job-queue-tradeoffs",
+      "query": "What are the downsides of using Postgres as a job queue?",
+      "relevant": [
+        {"filename": "0002-postgres-job-queue.md", "heading": "Consequences"}
+      ]
+    },
+    {
+      "id": "skip-locked",
+      "query": "How does the worker avoid two processes picking up the same job?",
+      "relevant": [
+        {"filename": "0002-postgres-job-queue.md", "heading": "Decision"},
+        {"filename": "0002-postgres-job-queue.md", "heading": "Consequences"}
+      ]
+    },
+    {
+      "id": "parser-language",
+      "query": "Why is the document parser written in Python instead of Go?",
+      "relevant": [
+        {"filename": "0003-python-parser-service.md", "heading": "Decision"},
+        {"filename": "README.md", "heading": "Architecture"}
+      ]
+    },
+    {
+      "id": "parser-service-boundary",
+      "query": "Is the parsing service a separate process from the main backend?",
+      "relevant": [
+        {"filename": "0003-python-parser-service.md", "heading": "Decision"},
+        {"filename": "0003-python-parser-service.md", "heading": "Consequences"}
+      ]
+    },
+    {
+      "id": "no-docling",
+      "query": "Why doesn't this project use docling for PDF parsing?",
+      "relevant": [
+        {"filename": "0004-lightweight-parsing.md", "heading": "Decision"},
+        {"filename": "0004-lightweight-parsing.md", "heading": "Context"}
+      ]
+    },
+    {
+      "id": "scanned-pdfs",
+      "query": "Does this project support scanned PDFs that have no text layer?",
+      "relevant": [
+        {"filename": "0004-lightweight-parsing.md", "heading": "Consequences"}
+      ]
+    },
+    {
+      "id": "migrations-tooling",
+      "query": "Why doesn't this project use goose or golang-migrate for database migrations?",
+      "relevant": [
+        {"filename": "0005-embedded-migrations.md", "heading": "Decision"},
+        {"filename": "0005-embedded-migrations.md", "heading": "Context"}
+      ]
+    },
+    {
+      "id": "migrations-mechanism",
+      "query": "How are SQL migrations applied when the application starts?",
+      "relevant": [
+        {"filename": "0005-embedded-migrations.md", "heading": "Decision"}
+      ]
+    },
+    {
+      "id": "quickstart",
+      "query": "How do I run this project locally for the first time?",
+      "relevant": [
+        {"filename": "README.md", "heading": "Quickstart"}
+      ]
+    },
+    {
+      "id": "repo-layout",
+      "query": "What are the top-level folders in this repository and what do they contain?",
+      "relevant": [
+        {"filename": "README.md", "heading": "Repository layout"}
+      ]
+    },
+    {
+      "id": "kubernetes-support",
+      "query": "Does this project include Kubernetes deployment manifests?",
+      "relevant": [
+        {"filename": "README.md", "heading": "Repository layout"}
+      ]
+    },
+    {
+      "id": "run-tests",
+      "query": "How do I run the test suite for this project?",
+      "relevant": [
+        {"filename": "README.md", "heading": "Development"}
+      ]
+    },
+    {
+      "id": "ci-checks",
+      "query": "What does continuous integration check on every push?",
+      "relevant": [
+        {"filename": "README.md", "heading": "Development"}
+      ]
+    },
+    {
+      "id": "backend-languages",
+      "query": "What programming languages does the backend use and why?",
+      "relevant": [
+        {"filename": "README.md", "heading": "Architecture"}
+      ]
+    },
+    {
+      "id": "sync-vs-async",
+      "query": "Why does this system separate document ingestion from answering questions?",
+      "relevant": [
+        {"filename": "README.md", "heading": "Architecture"}
+      ]
+    }
+  ]
+}

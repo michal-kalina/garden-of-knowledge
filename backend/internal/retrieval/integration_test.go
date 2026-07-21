@@ -36,7 +36,7 @@ func TestHybridSearchIntegration(t *testing.T) {
 	defer db.Close()
 
 	if _, err := db.ExecContext(ctx,
-		"DROP TABLE IF EXISTS chunks, ingestion_jobs, documents, users, schema_migrations CASCADE",
+		"DROP TABLE IF EXISTS messages, conversations, chunks, ingestion_jobs, documents, users, schema_migrations CASCADE",
 	); err != nil {
 		t.Fatal(err)
 	}

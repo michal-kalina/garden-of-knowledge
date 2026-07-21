@@ -33,7 +33,7 @@
 - [x] Persisted conversations: conversations/messages tables, `POST /chat` accepts `conversation_id` (creates or continues), history threaded into the prompt, exchange persisted only after a successful answer — verified by a cross-user isolation integration test
 
 ## Phase 4 — Quality & observability
-- [ ] Golden dataset (20–30 Q/A pairs), retrieval recall@k, answer quality evals
+- [x] Golden dataset (18 judged cases, `docs/eval/golden.json`) + retrieval eval harness (`cmd/eval`): recall@k and MRR against the real hybrid retriever, `make eval-retrieval` — see [ADR-0006](docs/adr/0006-retrieval-eval-harness.md) and [docs/eval/README.md](docs/eval/README.md) for a documented finding on lexical-retriever behavior
 - [ ] OpenTelemetry traces + Langfuse; cost per query
 - [ ] Reranking experiment with before/after eval numbers
 

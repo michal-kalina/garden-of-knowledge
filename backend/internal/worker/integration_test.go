@@ -100,7 +100,7 @@ func TestPipelineIntegration(t *testing.T) {
 
 	// Start from a clean slate so the test is rerunnable.
 	for _, stmt := range []string{
-		"DROP TABLE IF EXISTS chunks, ingestion_jobs, documents, users, schema_migrations CASCADE",
+		"DROP TABLE IF EXISTS messages, conversations, chunks, ingestion_jobs, documents, users, schema_migrations CASCADE",
 	} {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			t.Fatal(err)

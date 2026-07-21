@@ -1,4 +1,4 @@
-.PHONY: up down logs build build-web docker-build test test-backend test-parser test-integration lint lint-backend lint-parser venv-parser setup
+.PHONY: up down logs build build-web docker-build test test-backend test-parser test-integration eval-retrieval lint lint-backend lint-parser venv-parser setup
 
 PARSER_VENV := parser/.venv
 
@@ -38,6 +38,13 @@ test-parser: venv-parser
 #   DATABASE_URL=postgres://gok:gok_dev_password@localhost:5432/gok?sslmode=disable make test-integration
 test-integration:
 	cd backend && go test -race -tags integration ./...
+
+# Retrieval quality eval against the golden dataset (docs/eval/golden.json).
+# Requires DATABASE_URL and VOYAGE_API_KEY (see docs/eval/README.md for
+# corpus setup) and EVAL_USER — the account that ingested README.md + ADRs.
+eval-retrieval:
+	cd backend && go run ./cmd/eval -user-email "$(EVAL_USER)" \
+		-golden ../docs/eval/golden.json -out ../docs/eval/results/latest.md
 
 # --- Lint -------------------------------------------------------------------
 
