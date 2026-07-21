@@ -14,6 +14,7 @@ import (
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/auth"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/chat"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/config"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/conversations"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/database"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/documents"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/embeddings"
@@ -63,6 +64,7 @@ func run(logger *slog.Logger) error {
 	docs := documents.NewService(store, documents.NewRepository(db))
 	tokens := auth.NewTokens(cfg.AuthSecret, cfg.AuthTokenTTL)
 	userSvc := users.NewService(users.NewRepository(db), tokens)
+	convSvc := conversations.NewService(conversations.NewRepository(db))
 	embedder := embeddings.FromProvider(cfg.EmbeddingsProvider, cfg.VoyageAPIKey, cfg.VoyageModel, logger)
 	searcher := retrieval.New(db, embedder)
 
@@ -85,6 +87,7 @@ func run(logger *slog.Logger) error {
 			Documents:      docs,
 			Search:         searcher,
 			Chat:           chatSvc,
+			Conversations:  convSvc,
 			Users:          userSvc,
 			Verify:         tokens.Verify,
 			MaxUploadBytes: cfg.MaxUploadBytes,

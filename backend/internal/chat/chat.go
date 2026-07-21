@@ -1,7 +1,14 @@
 // Package chat turns a question into a streamed, citation-grounded answer:
 // retrieve relevant chunks, build a prompt with numbered sources, stream the
-// model's response. Stateless by design — conversation history arrives with
-// Phase 3.
+// model's response.
+//
+// Retrieval is still per-question only (the current question's text is what
+// gets embedded and searched) — a known limitation of naive RAG: a follow-up
+// like "and on what page?" carries little retrievable signal on its own.
+// Prior turns are given to the model so it can maintain continuity in its
+// answer, but do not yet rewrite the retrieval query. Query condensation
+// (folding history into the search query) is tracked as a Phase 4 candidate,
+// alongside the evals that would demonstrate whether it actually helps.
 package chat
 
 import (
@@ -32,6 +39,12 @@ type Source struct {
 	Content    string `json:"content"`
 }
 
+// Turn is one past exchange, given to the model as conversation context.
+type Turn struct {
+	Role    string // "user" | "assistant"
+	Content string
+}
+
 // Service orchestrates retrieval and generation.
 type Service struct {
 	retriever Retriever
@@ -57,7 +70,10 @@ Rules:
 - Cite every factual claim with the source number in square brackets, e.g. [1] or [2][3].
 - If the sources do not contain the answer, say so plainly instead of guessing.
 - Answer in the same language as the question.
-- Be concise.`
+- Be concise.
+- Earlier turns are given for conversational continuity (e.g. resolving "it" or "that"),
+  but every new factual claim must still be grounded in THIS turn's numbered sources —
+  a source from an earlier turn is not automatically valid for a new question.`
 
 // noSourcesReply is streamed verbatim when retrieval finds nothing — no LLM
 // call is made, because there is nothing to ground an answer in and the
@@ -65,15 +81,18 @@ Rules:
 const noSourcesReply = "I could not find anything in the knowledge base related to this question. " +
 	"Try rephrasing it, or check whether the relevant documents have been uploaded and are marked ready."
 
-// Ask runs the full flow. onSources fires once, before generation starts,
-// so the client can render the citation panel while text is still
-// streaming; onDelta fires per text fragment.
-func (s *Service) Ask(ctx context.Context, userID, question string,
-	onSources func([]Source) error, onDelta func(string) error) error {
+// Ask runs the full flow and returns the complete answer text (identical to
+// what was streamed via onDelta) so the caller can persist it without
+// re-accumulating deltas itself. onSources fires once, before generation
+// starts, so the client can render the citation panel while text is still
+// streaming; onDelta fires per text fragment. history is prior turns of the
+// same conversation, oldest first; pass nil for a fresh conversation.
+func (s *Service) Ask(ctx context.Context, userID, question string, history []Turn,
+	onSources func([]Source) error, onDelta func(string) error) (string, error) {
 
 	results, err := s.retriever.Search(ctx, userID, question, s.contextLimit)
 	if err != nil {
-		return fmt.Errorf("retrieve: %w", err)
+		return "", fmt.Errorf("retrieve: %w", err)
 	}
 
 	sources := make([]Source, len(results))
@@ -90,20 +109,27 @@ func (s *Service) Ask(ctx context.Context, userID, question string,
 		}
 	}
 	if err := onSources(sources); err != nil {
-		return err
+		return "", err
 	}
 
 	if len(sources) == 0 {
-		return onDelta(noSourcesReply)
+		if err := onDelta(noSourcesReply); err != nil {
+			return "", err
+		}
+		return noSourcesReply, nil
 	}
 
-	_, err = s.llm.Stream(ctx, systemPrompt,
-		[]llm.Message{{Role: "user", Content: buildUserPrompt(question, sources)}},
-		s.maxTokens, onDelta)
-	if err != nil {
-		return fmt.Errorf("generate: %w", err)
+	messages := make([]llm.Message, 0, len(history)+1)
+	for _, t := range history {
+		messages = append(messages, llm.Message{Role: t.Role, Content: t.Content})
 	}
-	return nil
+	messages = append(messages, llm.Message{Role: "user", Content: buildUserPrompt(question, sources)})
+
+	answer, err := s.llm.Stream(ctx, systemPrompt, messages, s.maxTokens, onDelta)
+	if err != nil {
+		return "", fmt.Errorf("generate: %w", err)
+	}
+	return answer, nil
 }
 
 // buildUserPrompt lays out the numbered sources followed by the question.

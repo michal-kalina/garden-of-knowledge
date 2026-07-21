@@ -14,6 +14,7 @@ type server struct {
 	docs           DocumentService
 	search         SearchService
 	chat           ChatService
+	conversations  ConversationsService
 	users          UserService
 	verify         TokenVerifier
 	logger         *slog.Logger
@@ -30,6 +31,7 @@ type Deps struct {
 	// Chat may be nil when ANTHROPIC_API_KEY is not configured; the /chat
 	// endpoint then answers 503 while the rest of the API stays usable.
 	Chat           ChatService
+	Conversations  ConversationsService
 	Users          UserService
 	Verify         TokenVerifier
 	MaxUploadBytes int64
@@ -43,6 +45,7 @@ func New(d Deps) http.Handler {
 		docs:           d.Documents,
 		search:         d.Search,
 		chat:           d.Chat,
+		conversations:  d.Conversations,
 		users:          d.Users,
 		verify:         d.Verify,
 		logger:         d.Logger,
@@ -77,6 +80,9 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /documents/{id}", s.requireAuth(s.handleDocumentGet))
 	mux.HandleFunc("POST /search", s.requireAuth(s.handleSearch))
 	mux.HandleFunc("POST /chat", s.requireAuth(s.handleChat))
+	mux.HandleFunc("GET /conversations", s.requireAuth(s.handleConversationList))
+	mux.HandleFunc("GET /conversations/{id}", s.requireAuth(s.handleConversationGet))
+	mux.HandleFunc("DELETE /conversations/{id}", s.requireAuth(s.handleConversationDelete))
 
 	return logging(d.Logger)(mux)
 }

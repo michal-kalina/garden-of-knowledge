@@ -68,13 +68,19 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sessionResponse{Token: token, User: u})
 }
 
-type ctxKey int
+// authedHandler is an HTTP handler that additionally receives the verified
+// user id as a plain parameter — not a context value. The signature is the
+// point: every authed route's dependency on tenancy is visible in its type,
+// and every call site is forced by the compiler to thread it onward into
+// documents/retrieval/chat, which take userID as an explicit argument for
+// exactly the same reason. A forgotten context key would fail silently at
+// runtime (empty string, matching nothing in SQL); a forgotten parameter
+// fails loudly at compile time. See the discussion in commit history for
+// the full trade-off.
+type authedHandler func(w http.ResponseWriter, r *http.Request, userID string)
 
-const userIDKey ctxKey = 1
-
-// requireAuth wraps a handler with Bearer-token authentication and puts the
-// user id in the request context.
-func (s *server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
+// requireAuth wraps an authedHandler with Bearer-token authentication.
+func (s *server) requireAuth(next authedHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		header := r.Header.Get("Authorization")
 		token, ok := strings.CutPrefix(header, "Bearer ")
@@ -87,11 +93,6 @@ func (s *server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, "invalid or expired session")
 			return
 		}
-		next(w, r.WithContext(context.WithValue(r.Context(), userIDKey, userID)))
+		next(w, r, userID)
 	}
-}
-
-func userIDFrom(ctx context.Context) string {
-	id, _ := ctx.Value(userIDKey).(string)
-	return id
 }

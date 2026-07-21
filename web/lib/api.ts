@@ -74,6 +74,49 @@ export interface Source {
   content: string;
 }
 
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StoredMessage {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  sources?: Source[];
+  created_at: string;
+}
+
+export interface ConversationDetail extends ConversationSummary {
+  messages: StoredMessage[];
+}
+
+export async function listConversations(): Promise<ConversationSummary[]> {
+  const res = checkSession(await fetch("/backend/conversations", { headers: authHeaders() }));
+  if (!res.ok) throw new Error(`listing conversations failed (${res.status})`);
+  const body = (await res.json()) as { conversations: ConversationSummary[] };
+  return body.conversations;
+}
+
+export async function getConversation(id: string): Promise<ConversationDetail> {
+  const res = checkSession(
+    await fetch(`/backend/conversations/${id}`, { headers: authHeaders() }),
+  );
+  if (!res.ok) throw new Error(`loading conversation failed (${res.status})`);
+  return (await res.json()) as ConversationDetail;
+}
+
+export async function deleteConversation(id: string): Promise<void> {
+  const res = checkSession(
+    await fetch(`/backend/conversations/${id}`, { method: "DELETE", headers: authHeaders() }),
+  );
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`deleting conversation failed (${res.status})`);
+  }
+}
+
 export async function listDocuments(): Promise<Doc[]> {
   const res = checkSession(await fetch("/backend/documents", { headers: authHeaders() }));
   if (!res.ok) throw new Error(`listing documents failed (${res.status})`);
@@ -99,6 +142,7 @@ export async function uploadDocument(file: File): Promise<Doc> {
 }
 
 export interface ChatHandlers {
+  onConversation?: (id: string) => void;
   onSources: (sources: Source[]) => void;
   onDelta: (text: string) => void;
 }
@@ -107,8 +151,13 @@ export interface ChatHandlers {
 // EventSource cannot send POST bodies, so we read the fetch body stream and
 // parse frames ourselves: frames are separated by a blank line, each frame
 // carries "event:" and "data:" lines.
+//
+// conversationId continues an existing conversation; omit it to start a new
+// one — the backend creates it and reports its id via onConversation, which
+// fires before onSources so the caller can key state on it immediately.
 export async function streamChat(
   query: string,
+  conversationId: string | undefined,
   handlers: ChatHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -116,7 +165,7 @@ export async function streamChat(
     await fetch("/backend/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, conversation_id: conversationId ?? "" }),
       signal,
     }),
   );
@@ -148,6 +197,9 @@ export async function streamChat(
       if (!data) continue;
 
       switch (event) {
+        case "conversation":
+          handlers.onConversation?.((JSON.parse(data) as { id: string }).id);
+          break;
         case "sources":
           handlers.onSources(JSON.parse(data) as Source[]);
           break;

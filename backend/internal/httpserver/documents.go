@@ -27,7 +27,7 @@ var allowedContentTypes = map[string]bool{
 	"text/plain":      true,
 }
 
-func (s *server) handleDocumentUpload(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleDocumentUpload(w http.ResponseWriter, r *http.Request, userID string) {
 	// MaxBytesReader protects the server before multipart parsing starts;
 	// exceeding the limit surfaces as *http.MaxBytesError below.
 	r.Body = http.MaxBytesReader(w, r.Body, s.maxUploadBytes)
@@ -51,7 +51,7 @@ func (s *server) handleDocumentUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	doc, err := s.docs.Upload(r.Context(), userIDFrom(r.Context()), documents.UploadInput{
+	doc, err := s.docs.Upload(r.Context(), userID, documents.UploadInput{
 		Filename:    header.Filename,
 		ContentType: contentType,
 		Size:        header.Size,
@@ -66,8 +66,8 @@ func (s *server) handleDocumentUpload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, doc)
 }
 
-func (s *server) handleDocumentList(w http.ResponseWriter, r *http.Request) {
-	docs, err := s.docs.List(r.Context(), userIDFrom(r.Context()))
+func (s *server) handleDocumentList(w http.ResponseWriter, r *http.Request, userID string) {
+	docs, err := s.docs.List(r.Context(), userID)
 	if err != nil {
 		s.logger.Error("list documents failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list documents")
@@ -76,8 +76,8 @@ func (s *server) handleDocumentList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"documents": docs})
 }
 
-func (s *server) handleDocumentGet(w http.ResponseWriter, r *http.Request) {
-	doc, err := s.docs.Get(r.Context(), userIDFrom(r.Context()), r.PathValue("id"))
+func (s *server) handleDocumentGet(w http.ResponseWriter, r *http.Request, userID string) {
+	doc, err := s.docs.Get(r.Context(), userID, r.PathValue("id"))
 	if errors.Is(err, documents.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "document not found")
 		return

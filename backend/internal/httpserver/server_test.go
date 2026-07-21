@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/chat"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/conversations"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/documents"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/retrieval"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/users"
@@ -84,6 +85,7 @@ func newTestServerWithSearch(t *testing.T) (http.Handler, *fakeDocs, *fakeSearch
 		Documents:      fake,
 		Search:         search,
 		Chat:           &fakeChat{},
+		Conversations:  newFakeConversations(),
 		Verify:         func(string) (string, error) { return "test-user", nil },
 		MaxUploadBytes: 1 << 20, // 1 MiB limit for tests
 		Logger:         logger,
@@ -94,18 +96,84 @@ func newTestServerWithSearch(t *testing.T) (http.Handler, *fakeDocs, *fakeSearch
 // fakeChat emits one sources event and two deltas.
 type fakeChat struct{ fail bool }
 
-func (f *fakeChat) Ask(_ context.Context, _ string, question string,
-	onSources func([]chat.Source) error, onDelta func(string) error) error {
+func (f *fakeChat) Ask(_ context.Context, _ string, question string, _ []chat.Turn,
+	onSources func([]chat.Source) error, onDelta func(string) error) (string, error) {
 	if err := onSources([]chat.Source{{Index: 1, ChunkID: 42, Filename: "a.md"}}); err != nil {
-		return err
+		return "", err
 	}
 	if err := onDelta("Hello "); err != nil {
-		return err
+		return "", err
 	}
 	if f.fail {
-		return context.DeadlineExceeded
+		return "", context.DeadlineExceeded
 	}
-	return onDelta("[1]")
+	if err := onDelta("[1]"); err != nil {
+		return "", err
+	}
+	return "Hello [1]", nil
+}
+
+// fakeConversations is an in-memory ConversationsService.
+type fakeConversations struct {
+	convs map[string]conversations.Conversation
+	msgs  map[string][]conversations.Message
+	// appended records the last AppendExchange call for assertions.
+	appended *struct {
+		userID, id, title, question, answer string
+		sources                             []chat.Source
+	}
+}
+
+func newFakeConversations() *fakeConversations {
+	return &fakeConversations{
+		convs: map[string]conversations.Conversation{},
+		msgs:  map[string][]conversations.Message{},
+	}
+}
+
+func (f *fakeConversations) Create(_ context.Context, userID string) (conversations.Conversation, error) {
+	c := conversations.Conversation{ID: "conv-" + userID}
+	f.convs[c.ID] = c
+	return c, nil
+}
+
+func (f *fakeConversations) List(_ context.Context, _ string) ([]conversations.Conversation, error) {
+	out := make([]conversations.Conversation, 0, len(f.convs))
+	for _, c := range f.convs {
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+func (f *fakeConversations) Get(_ context.Context, _, id string) (conversations.Conversation, []conversations.Message, error) {
+	c, ok := f.convs[id]
+	if !ok {
+		return conversations.Conversation{}, nil, conversations.ErrNotFound
+	}
+	return c, f.msgs[id], nil
+}
+
+func (f *fakeConversations) AppendExchange(_ context.Context, userID, id, title, question, answer string, sources []chat.Source) error {
+	if _, ok := f.convs[id]; !ok {
+		return conversations.ErrNotFound
+	}
+	f.appended = &struct {
+		userID, id, title, question, answer string
+		sources                             []chat.Source
+	}{userID, id, title, question, answer, sources}
+	f.msgs[id] = append(f.msgs[id],
+		conversations.Message{Role: "user", Content: question},
+		conversations.Message{Role: "assistant", Content: answer, Sources: sources},
+	)
+	return nil
+}
+
+func (f *fakeConversations) Delete(_ context.Context, _, id string) error {
+	if _, ok := f.convs[id]; !ok {
+		return conversations.ErrNotFound
+	}
+	delete(f.convs, id)
+	return nil
 }
 
 // multipartBody builds a multipart request body with a single "file" part.
@@ -268,20 +336,23 @@ func TestSearch(t *testing.T) {
 }
 
 func TestChat(t *testing.T) {
-	newChatServer := func(c ChatService) http.Handler {
+	newChatServer := func(c ChatService) (http.Handler, *fakeConversations) {
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-		return New(Deps{
+		fc := newFakeConversations()
+		h := New(Deps{
 			Documents:      &fakeDocs{docs: map[string]documents.Document{}},
 			Search:         &fakeSearch{},
 			Chat:           c,
+			Conversations:  fc,
 			Verify:         func(string) (string, error) { return "test-user", nil },
 			MaxUploadBytes: 1 << 20,
 			Logger:         logger,
 		})
+		return h, fc
 	}
 
-	t.Run("streams sources, deltas and done as SSE", func(t *testing.T) {
-		srv := newChatServer(&fakeChat{})
+	t.Run("streams conversation, sources, deltas and done as SSE, then persists", func(t *testing.T) {
+		srv, fc := newChatServer(&fakeChat{})
 		req := authed(httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"query":"hi"}`)))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
@@ -293,13 +364,14 @@ func TestChat(t *testing.T) {
 			t.Errorf("content type = %q", ct)
 		}
 		body := rec.Body.String()
+		iConv := strings.Index(body, "event: conversation")
 		iSources := strings.Index(body, "event: sources")
 		iDelta := strings.Index(body, "event: delta")
 		iDone := strings.Index(body, "event: done")
-		if iSources == -1 || iDelta == -1 || iDone == -1 {
+		if iConv == -1 || iSources == -1 || iDelta == -1 || iDone == -1 {
 			t.Fatalf("missing SSE events; body:\n%s", body)
 		}
-		if !(iSources < iDelta && iDelta < iDone) {
+		if !(iConv < iSources && iSources < iDelta && iDelta < iDone) {
 			t.Errorf("event order wrong; body:\n%s", body)
 		}
 		if !strings.Contains(body, `"chunk_id":42`) {
@@ -308,10 +380,59 @@ func TestChat(t *testing.T) {
 		if !strings.Contains(body, `{"text":"Hello "}`) {
 			t.Errorf("delta payload missing; body:\n%s", body)
 		}
+
+		if fc.appended == nil {
+			t.Fatal("exchange was not persisted")
+		}
+		if fc.appended.question != "hi" || fc.appended.answer != "Hello [1]" {
+			t.Errorf("persisted exchange = %+v", fc.appended)
+		}
+		if fc.appended.title == "" {
+			t.Error("title not set for a new conversation")
+		}
+		if len(fc.appended.sources) != 1 {
+			t.Errorf("persisted sources = %+v", fc.appended.sources)
+		}
+	})
+
+	t.Run("continuing a conversation loads its history and skips the title", func(t *testing.T) {
+		srv, fc := newChatServer(&fakeChat{})
+		fc.convs["existing"] = conversations.Conversation{ID: "existing", Title: "Old title"}
+		fc.msgs["existing"] = []conversations.Message{
+			{Role: "user", Content: "first question"},
+			{Role: "assistant", Content: "first answer"},
+		}
+
+		req := authed(httptest.NewRequest(http.MethodPost, "/chat",
+			strings.NewReader(`{"query":"follow-up","conversation_id":"existing"}`)))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d; body: %s", rec.Code, rec.Body)
+		}
+		if !strings.Contains(rec.Body.String(), `event: conversation`) ||
+			!strings.Contains(rec.Body.String(), `"id":"existing"`) {
+			t.Errorf("conversation id not echoed; body:\n%s", rec.Body.String())
+		}
+		if fc.appended == nil || fc.appended.title != "" {
+			t.Errorf("title must stay empty for an existing conversation: %+v", fc.appended)
+		}
+	})
+
+	t.Run("unknown conversation_id yields 404 before streaming", func(t *testing.T) {
+		srv, _ := newChatServer(&fakeChat{})
+		req := authed(httptest.NewRequest(http.MethodPost, "/chat",
+			strings.NewReader(`{"query":"hi","conversation_id":"missing"}`)))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", rec.Code)
+		}
 	})
 
 	t.Run("mid-stream failure arrives as an error event", func(t *testing.T) {
-		srv := newChatServer(&fakeChat{fail: true})
+		srv, fc := newChatServer(&fakeChat{fail: true})
 		req := authed(httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"query":"hi"}`)))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
@@ -323,10 +444,13 @@ func TestChat(t *testing.T) {
 		if strings.Contains(body, "event: done") {
 			t.Errorf("done must not follow an error; body:\n%s", body)
 		}
+		if fc.appended != nil {
+			t.Error("a failed generation must not be persisted")
+		}
 	})
 
 	t.Run("returns 503 when chat is unconfigured", func(t *testing.T) {
-		srv := newChatServer(nil)
+		srv, _ := newChatServer(nil)
 		req := authed(httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"query":"hi"}`)))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
@@ -336,7 +460,7 @@ func TestChat(t *testing.T) {
 	})
 
 	t.Run("rejects empty query with 400", func(t *testing.T) {
-		srv := newChatServer(&fakeChat{})
+		srv, _ := newChatServer(&fakeChat{})
 		req := authed(httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"query":""}`)))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)

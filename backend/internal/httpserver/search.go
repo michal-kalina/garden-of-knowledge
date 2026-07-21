@@ -22,7 +22,7 @@ type searchRequest struct {
 // handleSearch exposes hybrid retrieval directly. Besides powering future
 // tooling, it is the debugging window into the RAG: the response carries
 // per-retriever ranks, so "why did the chat cite this?" has an answer.
-func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleSearch(w http.ResponseWriter, r *http.Request, userID string) {
 	var req searchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -34,7 +34,7 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, err := s.search.Search(r.Context(), userIDFrom(r.Context()), req.Query, req.Limit)
+	results, err := s.search.Search(r.Context(), userID, req.Query, req.Limit)
 	if err != nil {
 		s.logger.Error("search failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "search failed")

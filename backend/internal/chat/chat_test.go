@@ -20,16 +20,18 @@ func (f *fakeRetriever) Search(_ context.Context, _ string, query string, _ int)
 }
 
 type fakeLLM struct {
-	system string
-	user   string
-	called bool
-	reply  string
+	system   string
+	user     string
+	messages []llm.Message
+	called   bool
+	reply    string
 }
 
 func (f *fakeLLM) Stream(_ context.Context, system string, msgs []llm.Message, _ int,
 	onDelta func(string) error) (string, error) {
 	f.called = true
 	f.system = system
+	f.messages = msgs
 	f.user = msgs[len(msgs)-1].Content
 	for _, part := range strings.SplitAfter(f.reply, " ") {
 		if err := onDelta(part); err != nil {
@@ -53,11 +55,14 @@ func TestAsk(t *testing.T) {
 
 		var gotSources []Source
 		var streamed strings.Builder
-		err := svc.Ask(context.Background(), "user-1", "how many vacation days?",
+		answer, err := svc.Ask(context.Background(), "user-1", "how many vacation days?", nil,
 			func(s []Source) error { gotSources = s; return nil },
 			func(d string) error { streamed.WriteString(d); return nil })
 		if err != nil {
 			t.Fatal(err)
+		}
+		if answer != streamed.String() {
+			t.Errorf("returned answer %q != streamed text %q", answer, streamed.String())
 		}
 
 		if ret.query != "how many vacation days?" {
@@ -92,7 +97,7 @@ func TestAsk(t *testing.T) {
 
 		var sources []Source
 		var streamed strings.Builder
-		err := svc.Ask(context.Background(), "user-1", "anything",
+		answer, err := svc.Ask(context.Background(), "user-1", "anything", nil,
 			func(s []Source) error { sources = s; return nil },
 			func(d string) error { streamed.WriteString(d); return nil })
 		if err != nil {
@@ -107,5 +112,42 @@ func TestAsk(t *testing.T) {
 		if !strings.Contains(streamed.String(), "could not find anything") {
 			t.Errorf("fallback not streamed: %q", streamed.String())
 		}
+		if answer != streamed.String() {
+			t.Errorf("returned answer %q != streamed %q", answer, streamed.String())
+		}
 	})
+}
+
+func TestAskWithHistory(t *testing.T) {
+	ret := &fakeRetriever{results: []retrieval.Result{
+		{ChunkID: 1, Filename: "a.md", Content: "some fact."},
+	}}
+	model := &fakeLLM{reply: "Sure, following up [1]."}
+	svc := New(ret, model)
+
+	history := []Turn{
+		{Role: "user", Content: "What is the policy?"},
+		{Role: "assistant", Content: "It's 26 days [1]."},
+	}
+	_, err := svc.Ask(context.Background(), "user-1", "and for part-time staff?", history,
+		func([]Source) error { return nil },
+		func(string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(model.user, "and for part-time staff?") {
+		t.Errorf("current question missing from prompt: %s", model.user)
+	}
+	// History must have been threaded through as prior messages, not folded
+	// into the retrieval query or the final user message.
+	if strings.Contains(model.user, "What is the policy?") {
+		t.Error("history leaked into the final user message instead of being separate turns")
+	}
+	if len(model.messages) != 3 {
+		t.Fatalf("messages = %d, want 3 (2 history + 1 current)", len(model.messages))
+	}
+	if model.messages[0].Role != "user" || model.messages[1].Role != "assistant" {
+		t.Errorf("history roles wrong: %+v", model.messages[:2])
+	}
 }

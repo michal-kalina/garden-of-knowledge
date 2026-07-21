@@ -30,7 +30,7 @@
 
 ## Phase 3 — Users & history
 - [x] Auth (register/login, HS256 session tokens, PBKDF2-hashed passwords with RFC test vectors) and per-user isolation of documents, search and chat — enforced in SQL, verified by an integration test
-- [ ] Persisted conversations
+- [x] Persisted conversations: conversations/messages tables, `POST /chat` accepts `conversation_id` (creates or continues), history threaded into the prompt, exchange persisted only after a successful answer — verified by a cross-user isolation integration test
 
 ## Phase 4 — Quality & observability
 - [ ] Golden dataset (20–30 Q/A pairs), retrieval recall@k, answer quality evals
