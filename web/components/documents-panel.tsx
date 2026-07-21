@@ -1,10 +1,16 @@
 "use client";
 
 import React from "react";
-import { LogOut, Sprout, Upload } from "lucide-react";
+import { LogOut, RotateCw, Sprout, Trash2, Upload } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { listDocuments, uploadDocument, type Doc } from "@/lib/api";
+import {
+  deleteDocument,
+  listDocuments,
+  retryDocument,
+  uploadDocument,
+  type Doc,
+} from "@/lib/api";
 import { clearSession, getEmail } from "@/lib/auth";
 
 const ACCEPT = ".pdf,.md,.txt,application/pdf,text/markdown,text/plain";
@@ -17,6 +23,9 @@ export function DocumentsPanel({ onLogout }: { onLogout: () => void }) {
   const [docs, setDocs] = React.useState<Doc[]>([]);
   const [error, setError] = React.useState<string | null>(null);
   const [uploading, setUploading] = React.useState(false);
+  // Tracks per-document in-flight retry/delete so only that row's controls
+  // disable, instead of freezing the whole list for one action.
+  const [busyIds, setBusyIds] = React.useState<Set<string>>(new Set());
   const fileInput = React.useRef<HTMLInputElement>(null);
 
   const refresh = React.useCallback(async () => {
@@ -51,6 +60,46 @@ export function DocumentsPanel({ onLogout }: { onLogout: () => void }) {
     } finally {
       setUploading(false);
     }
+  }
+
+  function withBusy(id: string, fn: () => Promise<void>) {
+    setBusyIds((s) => new Set(s).add(id));
+    setError(null);
+    fn()
+      .catch((err) => setError(err instanceof Error ? err.message : "action failed"))
+      .finally(() =>
+        setBusyIds((s) => {
+          const next = new Set(s);
+          next.delete(id);
+          return next;
+        }),
+      );
+  }
+
+  function onRetry(id: string) {
+    withBusy(id, async () => {
+      await retryDocument(id);
+      await refresh();
+    });
+  }
+
+  function onDelete(doc: Doc) {
+    // Deleting a document is more consequential than deleting a chat: it
+    // permanently erases ingested knowledge (chunks + embeddings), not just
+    // a conversation you could re-ask. A confirm dialog earns its keep here
+    // in a way it wouldn't for the conversations list.
+    if (!window.confirm(`Delete "${doc.filename}"? This removes it and everything parsed from it — this cannot be undone.`)) {
+      return;
+    }
+    withBusy(doc.id, async () => {
+      setDocs((prev) => prev.filter((d) => d.id !== doc.id)); // optimistic
+      try {
+        await deleteDocument(doc.id);
+      } catch (err) {
+        await refresh(); // roll back the optimistic removal
+        throw err;
+      }
+    });
   }
 
   return (
@@ -100,29 +149,58 @@ export function DocumentsPanel({ onLogout }: { onLogout: () => void }) {
           </p>
         ) : (
           <ul className="space-y-0.5">
-            {docs.map((d) => (
-              <li
-                key={d.id}
-                className="rounded-md px-2 py-2 hover:bg-sidebar-foreground/5"
-                title={d.error ?? undefined}
-              >
-                <p className="truncate font-mono text-xs">{d.filename}</p>
-                <div className="mt-1 flex items-center gap-2">
-                  <Badge variant={statusVariant(d.status)}>
-                    {d.status === "processing" && (
-                      <span
-                        className="germinate inline-block h-1.5 w-1.5 rounded-full bg-amber"
-                        aria-hidden
-                      />
-                    )}
-                    {d.status}
-                  </Badge>
-                  <span className="font-mono text-[0.65rem] text-sidebar-muted">
-                    {(d.size_bytes / 1024).toFixed(0)} KB
-                  </span>
-                </div>
-              </li>
-            ))}
+            {docs.map((d) => {
+              const busy = busyIds.has(d.id);
+              return (
+                <li
+                  key={d.id}
+                  className="group rounded-md px-2 py-2 hover:bg-sidebar-foreground/5"
+                  title={d.error ?? undefined}
+                >
+                  <p className="truncate font-mono text-xs">{d.filename}</p>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Badge variant={statusVariant(d.status)}>
+                        {d.status === "processing" && (
+                          <span
+                            className="germinate inline-block h-1.5 w-1.5 rounded-full bg-amber"
+                            aria-hidden
+                          />
+                        )}
+                        {d.status}
+                      </Badge>
+                      <span className="font-mono text-[0.65rem] text-sidebar-muted">
+                        {(d.size_bytes / 1024).toFixed(0)} KB
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                      {d.status === "failed" && (
+                        <button
+                          type="button"
+                          aria-label="Retry ingestion"
+                          title="Retry ingestion"
+                          disabled={busy}
+                          onClick={() => onRetry(d.id)}
+                          className="rounded p-1 text-sidebar-muted transition-colors hover:text-sidebar-foreground disabled:opacity-40"
+                        >
+                          <RotateCw className={busy ? "h-3 w-3 animate-spin" : "h-3 w-3"} aria-hidden />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        aria-label="Delete document"
+                        title="Delete document"
+                        disabled={busy}
+                        onClick={() => onDelete(d)}
+                        className="rounded p-1 text-sidebar-muted transition-colors hover:text-red-300 disabled:opacity-40"
+                      >
+                        <Trash2 className="h-3 w-3" aria-hidden />
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

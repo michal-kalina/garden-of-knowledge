@@ -57,6 +57,28 @@ func (f *fakeDocs) Get(_ context.Context, _ string, id string) (documents.Docume
 	return d, nil
 }
 
+func (f *fakeDocs) Retry(_ context.Context, _ string, id string) (documents.Document, error) {
+	d, ok := f.docs[id]
+	if !ok {
+		return documents.Document{}, documents.ErrNotFound
+	}
+	if d.Status != "failed" {
+		return documents.Document{}, documents.ErrNotFailed
+	}
+	d.Status = "pending"
+	d.Error = nil
+	f.docs[id] = d
+	return d, nil
+}
+
+func (f *fakeDocs) Delete(_ context.Context, _ string, id string) error {
+	if _, ok := f.docs[id]; !ok {
+		return documents.ErrNotFound
+	}
+	delete(f.docs, id)
+	return nil
+}
+
 // fakeSearch returns canned results and records the last query.
 type fakeSearch struct {
 	lastQuery string
@@ -279,6 +301,82 @@ func TestDocumentGet(t *testing.T) {
 
 	t.Run("returns 404 for unknown id", func(t *testing.T) {
 		req := authed(httptest.NewRequest(http.MethodGet, "/documents/22222222-2222-2222-2222-222222222222", nil))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", rec.Code)
+		}
+	})
+}
+
+func TestDocumentRetry(t *testing.T) {
+	t.Run("re-enqueues a failed document", func(t *testing.T) {
+		srv, fake := newTestServer(t)
+		errMsg := "parser exploded"
+		fake.docs["11111111-1111-1111-1111-111111111111"] = documents.Document{
+			ID: "11111111-1111-1111-1111-111111111111", Status: "failed", Error: &errMsg,
+		}
+		req := authed(httptest.NewRequest(http.MethodPost, "/documents/11111111-1111-1111-1111-111111111111/retry", nil))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
+		}
+		var doc documents.Document
+		if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+			t.Fatal(err)
+		}
+		if doc.Status != "pending" || doc.Error != nil {
+			t.Errorf("document after retry = %+v", doc)
+		}
+	})
+
+	t.Run("rejects retrying a document that isn't failed with 409", func(t *testing.T) {
+		srv, fake := newTestServer(t)
+		fake.docs["11111111-1111-1111-1111-111111111111"] = documents.Document{
+			ID: "11111111-1111-1111-1111-111111111111", Status: "ready",
+		}
+		req := authed(httptest.NewRequest(http.MethodPost, "/documents/11111111-1111-1111-1111-111111111111/retry", nil))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status = %d, want 409", rec.Code)
+		}
+	})
+
+	t.Run("returns 404 for unknown id", func(t *testing.T) {
+		srv, _ := newTestServer(t)
+		req := authed(httptest.NewRequest(http.MethodPost, "/documents/22222222-2222-2222-2222-222222222222/retry", nil))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", rec.Code)
+		}
+	})
+}
+
+func TestDocumentDelete(t *testing.T) {
+	t.Run("deletes an existing document", func(t *testing.T) {
+		srv, fake := newTestServer(t)
+		fake.docs["11111111-1111-1111-1111-111111111111"] = documents.Document{
+			ID: "11111111-1111-1111-1111-111111111111", Status: "ready",
+		}
+		req := authed(httptest.NewRequest(http.MethodDelete, "/documents/11111111-1111-1111-1111-111111111111", nil))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("status = %d, want 204", rec.Code)
+		}
+		if _, ok := fake.docs["11111111-1111-1111-1111-111111111111"]; ok {
+			t.Error("document still present after delete")
+		}
+	})
+
+	t.Run("returns 404 for unknown id", func(t *testing.T) {
+		srv, _ := newTestServer(t)
+		req := authed(httptest.NewRequest(http.MethodDelete, "/documents/22222222-2222-2222-2222-222222222222", nil))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 		if rec.Code != http.StatusNotFound {

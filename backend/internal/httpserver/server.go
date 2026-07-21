@@ -78,6 +78,8 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("POST /documents", s.requireAuth(s.handleDocumentUpload))
 	mux.HandleFunc("GET /documents", s.requireAuth(s.handleDocumentList))
 	mux.HandleFunc("GET /documents/{id}", s.requireAuth(s.handleDocumentGet))
+	mux.HandleFunc("POST /documents/{id}/retry", s.requireAuth(s.handleDocumentRetry))
+	mux.HandleFunc("DELETE /documents/{id}", s.requireAuth(s.handleDocumentDelete))
 	mux.HandleFunc("POST /search", s.requireAuth(s.handleSearch))
 	mux.HandleFunc("POST /chat", s.requireAuth(s.handleChat))
 	mux.HandleFunc("GET /conversations", s.requireAuth(s.handleConversationList))

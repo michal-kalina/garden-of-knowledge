@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"path/filepath"
 	"time"
 
@@ -19,6 +20,11 @@ import (
 
 // ErrNotFound is returned when a document does not exist.
 var ErrNotFound = errors.New("document not found")
+
+// ErrNotFailed is returned when Retry is called on a document that isn't
+// currently in the 'failed' state — retrying a document mid-flight or
+// already ready would race the worker or silently duplicate chunks.
+var ErrNotFailed = errors.New("document is not in a failed state")
 
 // Document mirrors a row in the documents table.
 // StorageKey is an internal detail and is never serialized to clients.
@@ -123,6 +129,83 @@ func (r *Repository) Get(ctx context.Context, userID, id string) (Document, erro
 	return d, err
 }
 
+// Retry moves a failed document back into the ingestion queue: it resets
+// the document to 'pending' and its job to 'queued' with a fresh attempt
+// budget, in one transaction. Restricted to documents currently 'failed' —
+// see ErrNotFailed — so a retry can never race a job the worker still has
+// claimed, and can never silently re-enqueue a document that's already
+// 'ready' (which would duplicate its chunks on the next worker pass).
+func (r *Repository) Retry(ctx context.Context, userID, id string) (Document, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return Document{}, ErrNotFound
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Document{}, err
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback after commit is a no-op
+
+	row := tx.QueryRowContext(ctx, `
+		UPDATE documents
+		SET status = 'pending', error = NULL, updated_at = now()
+		WHERE id = $1 AND user_id = $2 AND status = 'failed'
+		RETURNING `+docColumns, id, userID)
+	d, err := scanDocument(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		// The UPDATE matched nothing — find out whether that's because the
+		// document doesn't exist/isn't ours, or because it exists but isn't
+		// failed, so the caller can tell those apart (404 vs 409).
+		var status string
+		lookupErr := tx.QueryRowContext(ctx,
+			`SELECT status FROM documents WHERE id = $1 AND user_id = $2`, id, userID,
+		).Scan(&status)
+		if errors.Is(lookupErr, sql.ErrNoRows) {
+			return Document{}, ErrNotFound
+		}
+		if lookupErr != nil {
+			return Document{}, lookupErr
+		}
+		return Document{}, fmt.Errorf("%w: current status is %q", ErrNotFailed, status)
+	}
+	if err != nil {
+		return Document{}, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE ingestion_jobs
+		SET status = 'queued', attempts = 0, last_error = NULL, updated_at = now()
+		WHERE document_id = $1
+	`, id); err != nil {
+		return Document{}, fmt.Errorf("reset ingestion job: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Document{}, err
+	}
+	return d, nil
+}
+
+// Delete removes a document and returns its storage key so the caller can
+// also remove the underlying object. Ownership and existence are checked in
+// the same statement that deletes — there is no separate lookup to race.
+// Chunks and the ingestion job cascade via their ON DELETE CASCADE foreign
+// keys (migration 0001): deleting the document row is what "erases the
+// trace of having parsed this file" that the caller asked for.
+func (r *Repository) Delete(ctx context.Context, userID, id string) (storageKey string, err error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return "", ErrNotFound
+	}
+	err = r.db.QueryRowContext(ctx, `
+		DELETE FROM documents WHERE id = $1 AND user_id = $2
+		RETURNING storage_key
+	`, id, userID).Scan(&storageKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return storageKey, err
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }
@@ -136,12 +219,13 @@ func scanDocument(s scanner) (Document, error) {
 
 // Service orchestrates the upload flow: store the file, then record it.
 type Service struct {
-	store storage.ObjectStore
-	repo  *Repository
+	store  storage.ObjectStore
+	repo   *Repository
+	logger *slog.Logger
 }
 
-func NewService(store storage.ObjectStore, repo *Repository) *Service {
-	return &Service{store: store, repo: repo}
+func NewService(store storage.ObjectStore, repo *Repository, logger *slog.Logger) *Service {
+	return &Service{store: store, repo: repo, logger: logger}
 }
 
 // UploadInput carries a validated upload from the HTTP layer.
@@ -181,4 +265,34 @@ func (s *Service) List(ctx context.Context, userID string) ([]Document, error) {
 
 func (s *Service) Get(ctx context.Context, userID, id string) (Document, error) {
 	return s.repo.Get(ctx, userID, id)
+}
+
+func (s *Service) Retry(ctx context.Context, userID, id string) (Document, error) {
+	return s.repo.Retry(ctx, userID, id)
+}
+
+// Delete removes the document (and, via cascade, its chunks and ingestion
+// job) then best-effort deletes the underlying object. The DB row goes
+// first: if the storage delete then fails, we're left with an orphaned
+// object in the bucket — harmless and sweepable later. The reverse order
+// would be worse: a storage delete succeeding while the DB row survives
+// would leave a 'ready' document whose file no longer exists, breaking any
+// future read of it. This mirrors the ordering trade-off already made in
+// Upload (store-then-insert), just reversed because deletion runs it
+// back to front.
+func (s *Service) Delete(ctx context.Context, userID, id string) error {
+	storageKey, err := s.repo.Delete(ctx, userID, id)
+	if err != nil {
+		return err
+	}
+	if err := s.store.Delete(ctx, storageKey); err != nil {
+		// The document is already gone from the user's (and the API's)
+		// point of view — the DB commit succeeded, chunks are cascaded
+		// away, it will no longer show up anywhere. A leftover object in
+		// the bucket is a sweepable orphan, not a failed delete; reporting
+		// this to the client as an error would be misleading.
+		s.logger.Error("storage cleanup failed after document delete",
+			"document_id", id, "storage_key", storageKey, "error", err)
+	}
+	return nil
 }

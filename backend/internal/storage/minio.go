@@ -61,3 +61,10 @@ func (m *MinIO) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	}
 	return obj, nil
 }
+
+func (m *MinIO) Delete(ctx context.Context, key string) error {
+	if err := m.client.RemoveObject(ctx, m.bucket, key, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("delete object %q: %w", key, err)
+	}
+	return nil
+}

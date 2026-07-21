@@ -45,6 +45,11 @@ func (m *memStore) Get(_ context.Context, key string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(m.objects[key])), nil
 }
 
+func (m *memStore) Delete(_ context.Context, key string) error {
+	delete(m.objects, key)
+	return nil
+}
+
 // mdParser is a minimal stand-in for the Python service: headings and
 // paragraphs from Markdown-ish text, enough to exercise the chunker.
 type mdParser struct{}
@@ -117,7 +122,7 @@ func TestPipelineIntegration(t *testing.T) {
 
 	store := &memStore{objects: map[string][]byte{}}
 	repo := documents.NewRepository(db)
-	svc := documents.NewService(store, repo)
+	svc := documents.NewService(store, repo, logger)
 
 	owner, err := users.NewRepository(db).Create(ctx, "worker-test@example.com", "not-a-real-hash")
 	if err != nil {

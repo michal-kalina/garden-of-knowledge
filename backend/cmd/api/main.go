@@ -61,7 +61,7 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("object storage ready", "bucket", cfg.S3Bucket)
 
-	docs := documents.NewService(store, documents.NewRepository(db))
+	docs := documents.NewService(store, documents.NewRepository(db), logger)
 	tokens := auth.NewTokens(cfg.AuthSecret, cfg.AuthTokenTTL)
 	userSvc := users.NewService(users.NewRepository(db), tokens)
 	convSvc := conversations.NewService(conversations.NewRepository(db))

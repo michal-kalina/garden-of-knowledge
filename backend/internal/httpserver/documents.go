@@ -15,6 +15,8 @@ type DocumentService interface {
 	Upload(ctx context.Context, userID string, in documents.UploadInput) (documents.Document, error)
 	List(ctx context.Context, userID string) ([]documents.Document, error)
 	Get(ctx context.Context, userID, id string) (documents.Document, error)
+	Retry(ctx context.Context, userID, id string) (documents.Document, error)
+	Delete(ctx context.Context, userID, id string) error
 }
 
 // allowedContentTypes is the ingestion allowlist. It grows together with the
@@ -92,4 +94,40 @@ func (s *server) handleDocumentGet(w http.ResponseWriter, r *http.Request, userI
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// handleDocumentRetry re-enqueues a failed document for ingestion. Only
+// valid from the 'failed' state (see documents.ErrNotFailed) — surfaced as
+// 409 Conflict, since the request is well-formed but the resource's current
+// state doesn't allow it.
+func (s *server) handleDocumentRetry(w http.ResponseWriter, r *http.Request, userID string) {
+	doc, err := s.docs.Retry(r.Context(), userID, r.PathValue("id"))
+	if errors.Is(err, documents.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "document not found")
+		return
+	}
+	if errors.Is(err, documents.ErrNotFailed) {
+		writeError(w, http.StatusConflict, "only a failed document can be retried")
+		return
+	}
+	if err != nil {
+		s.logger.Error("retry document failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to retry document")
+		return
+	}
+	writeJSON(w, http.StatusOK, doc)
+}
+
+func (s *server) handleDocumentDelete(w http.ResponseWriter, r *http.Request, userID string) {
+	err := s.docs.Delete(r.Context(), userID, r.PathValue("id"))
+	if errors.Is(err, documents.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "document not found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("delete document failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete document")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

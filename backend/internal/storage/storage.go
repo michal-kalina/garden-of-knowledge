@@ -17,4 +17,8 @@ type ObjectStore interface {
 	Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) error
 	// Get returns a reader for the object. The caller must Close it.
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
+	// Delete removes the object. Deleting a key that doesn't exist is not
+	// an error — callers use this for cleanup, where "already gone" and
+	// "successfully removed" should be treated the same.
+	Delete(ctx context.Context, key string) error
 }

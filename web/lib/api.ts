@@ -141,6 +141,31 @@ export async function uploadDocument(file: File): Promise<Doc> {
   return (await res.json()) as Doc;
 }
 
+// retryDocument re-enqueues a document that failed ingestion. The backend
+// only allows this from the 'failed' state (409 otherwise).
+export async function retryDocument(id: string): Promise<Doc> {
+  const res = checkSession(
+    await fetch(`/backend/documents/${id}/retry`, { method: "POST", headers: authHeaders() }),
+  );
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `retry failed (${res.status})`);
+  }
+  return (await res.json()) as Doc;
+}
+
+// deleteDocument removes the document and everything derived from it
+// (chunks, ingestion job) via the backend's cascade, plus the underlying
+// object in storage.
+export async function deleteDocument(id: string): Promise<void> {
+  const res = checkSession(
+    await fetch(`/backend/documents/${id}`, { method: "DELETE", headers: authHeaders() }),
+  );
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`delete failed (${res.status})`);
+  }
+}
+
 export interface ChatHandlers {
   onConversation?: (id: string) => void;
   onSources: (sources: Source[]) => void;
