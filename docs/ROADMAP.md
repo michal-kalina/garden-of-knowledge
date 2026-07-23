@@ -35,7 +35,7 @@
 ## Phase 4 — Quality & observability
 - [x] Golden dataset (18 judged cases, `docs/eval/golden.json`) + retrieval eval harness (`cmd/eval`): recall@k and MRR against the real hybrid retriever, `make eval-retrieval` — see [ADR-0006](docs/adr/0006-retrieval-eval-harness.md) and [docs/eval/README.md](docs/eval/README.md) for a documented finding on lexical-retriever behavior
 - [ ] OpenTelemetry traces + Langfuse; cost per query
-- [x] Reranking: Voyage cross-encoder behind a `Retriever`-shaped decorator (`retrieval.Reranked`), opt-in via `RERANK_PROVIDER`, `make eval-retrieval-reranked` for a before/after comparison against the Step 1 baseline — see [ADR-0007](docs/adr/0007-reranking.md)
+- [x] Reranking: Voyage cross-encoder behind a `Retriever`-shaped decorator (`retrieval.Reranked`), opt-in via `RERANK_PROVIDER`. Measured, real result: MRR/Recall@1 improved, Recall@3 regressed ("summary-chunk cannibalization"), Recall@5 (≈ chat's context window) unchanged — kept off by default. See [ADR-0007](docs/adr/0007-reranking.md) and [docs/eval/README.md](docs/eval/README.md).
 
 ## Phase 5 — Deployment
 - [ ] Kubernetes manifests / Helm chart, k3d walkthrough

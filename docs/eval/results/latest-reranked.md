@@ -297,4 +297,3 @@ Retrieved (top 5):
 3. [ ] `README.md#Garden of Knowledge` (rerank: 0.479)
 4. [ ] `0002-postgres-job-queue.md#Consequences` (rerank: 0.439)
 5. [ ] `README.md#Design decisions` (rerank: 0.436)
-

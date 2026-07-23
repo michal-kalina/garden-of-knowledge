@@ -7,11 +7,11 @@ set, instead of eyeballing a handful of manual queries.
 
 1. Ingest the eval corpus — `README.md` and every file in `docs/adr/` — via
    the normal upload flow, logged in as a dedicated account (e.g.
-   `eval@gok.test`). Using the project's own docs as the corpus keeps
+   `eval@yourdomain.test`). Using the project's own docs as the corpus keeps
    the eval reproducible without exposing anyone's private documents.
 2. Make sure `VOYAGE_API_KEY` is set — running with the fake embedder
    produces a report, but the numbers measure nothing (see "Known findings").
-3. `make eval-retrieval EVAL_USER=eval@gok.test`
+3. `make eval-retrieval EVAL_USER=eval@yourdomain.test`
 
 This writes `docs/eval/results/latest.md` and prints the same report to
 stdout: an aggregate table (MRR, Recall@1/3/5/10) followed by a per-case
@@ -61,12 +61,39 @@ them, or just compare the summary tables. Requires `VOYAGE_API_KEY`
 regardless of which embeddings provider is configured — reranking is a
 separate API call, billed separately from embeddings.
 
-**Numbers pending a real run**: I can't call `api.voyageai.com` from this
-sandbox (network egress is allowlisted to package registries only — see
-`internal/rerank/rerank_test.go` for the httptest-based unit tests that
-verify the client instead), so unlike the retrieval baseline below, the
-reranked comparison has to come from your own run. Paste the resulting
-`latest-reranked.md` back and I'll fold the real numbers into this section.
+### Result: real, checked-in run (`rerank-2.5`, 2026-07-22)
+
+| Metric | Baseline | Reranked | Delta |
+|---|---|---|---|
+| MRR | 0.833 | 0.866 | **+0.033** |
+| Recall@1 | 0.556 | 0.639 | **+0.083** |
+| Recall@3 | 0.944 | 0.806 | **−0.138** |
+| Recall@5 | 0.944 | 0.944 | 0.000 |
+| Recall@10 | 1.000 | 1.000 | 0.000 |
+
+**This is not a clean win, and that's the finding worth keeping.** MRR and
+Recall@1 improved as ADR-0007 predicted — the cross-encoder is genuinely
+better at picking the single best chunk. But Recall@3 regressed by 14
+points, driven by a repeatable pattern in the per-case detail
+(`results/latest-reranked.md`): `README.md#Design decisions` and
+`README.md#Architecture` — short, cross-cutting sections that each touch
+several ADRs in passing — score highly against *many unrelated queries*
+(`vectorstore-choice`, `no-message-broker`, `job-queue-tradeoffs`,
+`parser-service-boundary` all pull one of them into the top 2). They read
+as "topically relevant" to a cross-encoder trained on general semantic
+match, and end up displacing the second judged-relevant chunk out of the
+top 3 — call it **summary-chunk cannibalization**.
+
+The number that actually matters for production: chat feeds the top
+`contextLimit = 6` chunks to the model (`internal/chat`), which Recall@5
+approximates — and **Recall@5 is unchanged, 0.944 both ways.** For this
+corpus and query style, reranking costs an extra network call and money per
+chat turn for a metric that, at the depth the model actually sees, doesn't
+move. `RERANK_PROVIDER` stays off by default; the code stays available and
+correctly wired for a corpus where it might pay off differently (denser
+documents without a "table of contents"-style chunk, or a larger
+`contextLimit`). Re-run both eval targets after any retrieval or chunking
+change and compare — this table is the reference point.
 
 ## Baseline
 
