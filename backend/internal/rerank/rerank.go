@@ -35,7 +35,8 @@ type Reranker interface {
 // not for testing rerank quality.
 type Fake struct{}
 
-// compile-time check that Fake implements Rerankervar _ Reranker = Fake{}
+// compile-time check that Fake implements Reranker
+var _ Reranker = Fake{}
 
 func (Fake) ModelName() string { return "fake" }
 

@@ -3,7 +3,7 @@
 **Status:** accepted · **Date:** 2026-07
 
 ## Context
-The Phase 4 Krok 1 baseline (`docs/eval/results/latest.md`, no reranking)
+The Phase 4 Step 1 baseline (`docs/eval/results/latest.md`, no reranking)
 measured MRR 0.833, Recall@1 0.556, Recall@10 1.0. The gap between Recall@1
 and Recall@10 is the finding: the right *document* is always found
 somewhere in the candidates, but the right *section* of it frequently isn't

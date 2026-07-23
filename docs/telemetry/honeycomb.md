@@ -29,14 +29,12 @@ exporter defaults to HTTPS, which is what you want) and leave
 `OTEL_EXPORTER_OTLP_URL_PATH` unset — Honeycomb's traces endpoint is the
 OTLP-standard `/v1/traces`, this project's default.
 
-**Why `OTEL_EXPORTER_OTLP_HEADERS` isn't a variable this project's own code
-reads:** it's a standard OpenTelemetry environment variable that the
-`otlptracehttp` exporter reads on its own during setup, independent of the
-endpoint/insecure/path options this project sets explicitly in
-[`internal/telemetry`](../../backend/internal/telemetry/telemetry.go). Verify
-this against the current `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`
-docs if traces aren't showing up — exact env-var precedence has changed
-between SDK versions before.
+`OTEL_EXPORTER_OTLP_HEADERS` is parsed explicitly by this project's own
+[`internal/telemetry`](../../backend/internal/telemetry/telemetry.go) (comma-separated
+`key=value` pairs, first `=` splits each pair) and passed to the exporter via
+`otlptracehttp.WithHeaders()` — not left to the SDK's own environment-variable
+handling, which is harder to predict across versions when other options are
+also set explicitly.
 
 ## 3. Dataset routing
 

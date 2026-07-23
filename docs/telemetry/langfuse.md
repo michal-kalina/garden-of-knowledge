@@ -42,6 +42,11 @@ Three things worth being precise about, since Langfuse's ingestion path is
   `OTEL_EXPORTER_OTLP_INSECURE` unset — Langfuse Cloud requires HTTPS.
 - **Langfuse only supports OTLP/HTTP** (JSON or protobuf), not gRPC — this
   project's exporter is already HTTP-only, so nothing to change there.
+- `OTEL_EXPORTER_OTLP_HEADERS` is parsed by this project's own
+  [`internal/telemetry`](../../backend/internal/telemetry/telemetry.go)
+  (comma-separated `key=value` pairs, split on the first `=` so a
+  base64-padded value can itself contain `=`) — the `Authorization=Basic ...`
+  value above works as-is.
 
 ## 4. Run and verify
 
@@ -67,4 +72,4 @@ automated feedback scores later, since that may still require their SDK's
 dedicated ingestion path rather than pure OTLP.
 
 ## Documentation
-(OpenTelemetry setup)[https://langfuse.com/integrations/native/opentelemetry]
+[OpenTelemetry setup](https://langfuse.com/integrations/native/opentelemetry)
