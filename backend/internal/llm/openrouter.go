@@ -27,6 +27,7 @@ type OpenRouter struct {
 	HTTP    *http.Client
 }
 
+// compile-time check that *OpenRouter implements Streamer
 var _ Streamer = (*OpenRouter)(nil)
 
 func NewOpenRouter(apiKey, model string) *OpenRouter {

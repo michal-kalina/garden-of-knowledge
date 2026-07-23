@@ -43,6 +43,15 @@ type Config struct {
 	// dimension explicitly).
 	VoyageModel string
 
+	// RerankProvider enables a cross-encoder reranking pass after hybrid
+	// search. Empty (default) means disabled — reranking adds latency and
+	// cost, so it's opt-in, not inferred from VOYAGE_API_KEY being present
+	// (unlike embeddings, where an unset provider still needs *some*
+	// default). Only "voyage" is supported today.
+	RerankProvider string
+	// RerankModel defaults to Voyage's current recommendation.
+	RerankModel string
+
 	// LLMProvider selects the chat backend: "anthropic" or "openrouter".
 	// Empty (no key configured) leaves /chat unconfigured (503) while the
 	// rest of the API works. Inferred from which API key is set when not
@@ -96,6 +105,19 @@ func Load() (Config, error) {
 	}
 	cfg.VoyageAPIKey = os.Getenv("VOYAGE_API_KEY")
 	cfg.VoyageModel = getenvDefault("VOYAGE_MODEL", "voyage-4")
+
+	cfg.RerankProvider = os.Getenv("RERANK_PROVIDER")
+	cfg.RerankModel = getenvDefault("RERANK_MODEL", "rerank-2.5")
+	switch cfg.RerankProvider {
+	case "":
+		// Reranking stays disabled.
+	case "voyage":
+		if cfg.VoyageAPIKey == "" {
+			return Config{}, fmt.Errorf("RERANK_PROVIDER=voyage requires VOYAGE_API_KEY")
+		}
+	default:
+		return Config{}, fmt.Errorf("unknown RERANK_PROVIDER %q (supported: voyage)", cfg.RerankProvider)
+	}
 
 	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
 	openrouterKey := os.Getenv("OPENROUTER_API_KEY")

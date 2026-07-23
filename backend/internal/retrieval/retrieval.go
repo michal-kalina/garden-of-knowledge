@@ -63,6 +63,19 @@ type Result struct {
 	Score      float64 `json:"score"`
 	VectorRank int     `json:"vector_rank,omitempty"`
 	TextRank   int     `json:"text_rank,omitempty"`
+	// RerankScore is set only when a cross-encoder reranker ran (see
+	// retrieval.Reranked); its scale is provider-specific and not
+	// comparable to Score (RRF), which is why both are kept side by side
+	// rather than one overwriting the other.
+	RerankScore *float64 `json:"rerank_score,omitempty"`
+}
+
+// Retriever is the shape both Searcher and Reranked satisfy — chat and the
+// eval harness depend on this (or their own structurally identical
+// interface), never on a concrete type, so wrapping one behind the other is
+// invisible to everything downstream.
+type Retriever interface {
+	Search(ctx context.Context, userID, query string, limit int) ([]Result, error)
 }
 
 // Searcher runs hybrid retrieval. Only ready documents are searched.
@@ -70,6 +83,9 @@ type Searcher struct {
 	db       *sql.DB
 	embedder embeddings.Embedder
 }
+
+// compile-time check that Searcher implements Retriever
+var _ Retriever = (*Searcher)(nil)
 
 func New(db *sql.DB, embedder embeddings.Embedder) *Searcher {
 	return &Searcher{db: db, embedder: embedder}

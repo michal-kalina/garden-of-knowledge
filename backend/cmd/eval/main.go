@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/database"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/embeddings"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/eval"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/rerank"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/retrieval"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/users"
 )
@@ -30,17 +32,24 @@ func main() {
 	goldenPath := flag.String("golden", "docs/eval/golden.json", "path to the golden dataset JSON")
 	userEmail := flag.String("user-email", "", "account that owns the ingested eval corpus (required)")
 	outPath := flag.String("out", "", "write the Markdown report here in addition to stdout (optional)")
+	rerankEnabled := flag.Bool("rerank", false, "wrap retrieval with a Voyage cross-encoder rerank pass "+
+		"(requires VOYAGE_API_KEY regardless of -rerank-model); run once without and once with this flag "+
+		"to produce a before/after comparison")
+	rerankModel := flag.String("rerank-model", "rerank-2.5", "Voyage rerank model, used only with -rerank")
 	flag.Parse()
 
-	if err := run(*goldenPath, *userEmail, *outPath); err != nil {
+	if err := run(*goldenPath, *userEmail, *outPath, *rerankEnabled, *rerankModel); err != nil {
 		fmt.Fprintln(os.Stderr, "eval failed:", err)
 		os.Exit(1)
 	}
 }
 
-func run(goldenPath, userEmail, outPath string) error {
+func run(goldenPath, userEmail, outPath string, rerankEnabled bool, rerankModel string) error {
 	if userEmail == "" {
 		return fmt.Errorf("-user-email is required (the account that owns the ingested README + ADR corpus)")
+	}
+	if rerankEnabled && os.Getenv("VOYAGE_API_KEY") == "" {
+		return fmt.Errorf("-rerank requires VOYAGE_API_KEY (used for the reranking call regardless of EMBEDDINGS_PROVIDER)")
 	}
 
 	ctx := context.Background()
@@ -82,7 +91,7 @@ func run(goldenPath, userEmail, outPath string) error {
 	}
 	logger.Info("loaded golden set", "cases", len(golden.Cases), "note", golden.CorpusNote)
 
-	searcher := retrieval.New(db, embedder)
+	searcher := buildSearcher(db, embedder, rerankEnabled, rerankModel, os.Getenv("VOYAGE_API_KEY"), logger)
 	search := func(query string, limit int) ([]retrieval.Result, error) {
 		return searcher.Search(ctx, rawUser.ID, query, limit)
 	}
@@ -92,7 +101,7 @@ func run(goldenPath, userEmail, outPath string) error {
 		return fmt.Errorf("evaluate: %w", err)
 	}
 
-	md := renderMarkdown(report)
+	md := renderMarkdown(report, rerankEnabled, rerankModel)
 	fmt.Println(md)
 
 	if outPath != "" {
@@ -105,6 +114,24 @@ func run(goldenPath, userEmail, outPath string) error {
 		logger.Info("report written", "path", outPath)
 	}
 	return nil
+}
+
+// buildSearcher wraps hybrid retrieval with a reranking pass when requested.
+// Kept separate from run() so the "which searcher am I actually testing"
+// decision is a single, obvious call site — the same shape as the
+// production wiring in cmd/api/main.go, deliberately, so the eval measures
+// the same code path that serves real chat requests.
+func buildSearcher(db *sql.DB, embedder embeddings.Embedder, rerankEnabled bool, rerankModel, voyageKey string,
+	logger *slog.Logger) retrieval.Retriever {
+	var searcher retrieval.Retriever = retrieval.New(db, embedder)
+	if rerankEnabled {
+		searcher = &retrieval.Reranked{
+			Base:     searcher,
+			Reranker: rerank.NewVoyage(voyageKey, rerankModel),
+		}
+		logger.Info("reranking enabled for this eval run", "model", rerankModel)
+	}
+	return searcher
 }
 
 func loadGolden(path string) (eval.GoldenSet, error) {
@@ -133,9 +160,15 @@ func envDefault(key, def string) string {
 // per-case breakdown showing exactly which sources were retrieved at what
 // rank — the detail that turns "recall@5 = 0.83" into something you can act
 // on (a specific query that's missing a specific source).
-func renderMarkdown(r eval.Report) string {
+func renderMarkdown(r eval.Report, rerankEnabled bool, rerankModel string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Retrieval eval — %d cases\n\n", len(r.Cases))
+	fmt.Fprintf(&b, "# Retrieval eval — %d cases", len(r.Cases))
+	if rerankEnabled {
+		fmt.Fprintf(&b, " (reranked: %s)", rerankModel)
+	} else {
+		b.WriteString(" (no reranking)")
+	}
+	b.WriteString("\n\n")
 
 	ks := make([]int, 0, len(r.MeanRecall))
 	for k := range r.MeanRecall {
@@ -173,7 +206,11 @@ func renderMarkdown(r eval.Report) string {
 					mark = "✓"
 				}
 			}
-			fmt.Fprintf(&b, "%d. [%s] `%s#%s`\n", i+1, mark, res.Filename, res.Heading)
+			if res.RerankScore != nil {
+				fmt.Fprintf(&b, "%d. [%s] `%s#%s` (rerank: %.3f)\n", i+1, mark, res.Filename, res.Heading, *res.RerankScore)
+			} else {
+				fmt.Fprintf(&b, "%d. [%s] `%s#%s`\n", i+1, mark, res.Filename, res.Heading)
+			}
 		}
 		b.WriteString("\n")
 	}

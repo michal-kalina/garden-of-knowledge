@@ -1,4 +1,4 @@
-# Retrieval eval — 18 cases
+# Retrieval eval — 18 cases (no reranking)
 
 | Metric | Value |
 |---|---|

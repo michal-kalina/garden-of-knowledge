@@ -20,6 +20,7 @@ import (
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/embeddings"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/httpserver"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/llm"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/rerank"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/retrieval"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/storage"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/users"
@@ -66,7 +67,14 @@ func run(logger *slog.Logger) error {
 	userSvc := users.NewService(users.NewRepository(db), tokens)
 	convSvc := conversations.NewService(conversations.NewRepository(db))
 	embedder := embeddings.FromProvider(cfg.EmbeddingsProvider, cfg.VoyageAPIKey, cfg.VoyageModel, logger)
-	searcher := retrieval.New(db, embedder)
+	var searcher retrieval.Retriever = retrieval.New(db, embedder)
+	if cfg.RerankProvider == "voyage" {
+		searcher = &retrieval.Reranked{
+			Base:     searcher,
+			Reranker: rerank.NewVoyage(cfg.VoyageAPIKey, cfg.RerankModel),
+		}
+		logger.Info("reranking enabled", "model", cfg.RerankModel)
+	}
 
 	var chatSvc httpserver.ChatService
 	if cfg.LLMProvider != "" {

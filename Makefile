@@ -46,6 +46,13 @@ eval-retrieval:
 	cd backend && go run ./cmd/eval -user-email "$(EVAL_USER)" \
 		-golden ../docs/eval/golden.json -out ../docs/eval/results/latest.md
 
+# Same corpus, same golden set, with a Voyage cross-encoder rerank pass
+# added on top of hybrid search. Run both targets and diff the two report
+# files for a before/after comparison (see docs/eval/README.md).
+eval-retrieval-reranked:
+	cd backend && go run ./cmd/eval -user-email "$(EVAL_USER)" -rerank \
+		-golden ../docs/eval/golden.json -out ../docs/eval/results/latest-reranked.md
+
 # --- Lint -------------------------------------------------------------------
 
 lint: lint-backend lint-parser

@@ -188,6 +188,49 @@ func TestLoad(t *testing.T) {
 		}
 	})
 
+	t.Run("rerank is disabled by default", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "test-secret")
+		t.Setenv("RERANK_PROVIDER", "")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.RerankProvider != "" {
+			t.Errorf("RerankProvider = %q, want disabled by default", cfg.RerankProvider)
+		}
+		if cfg.RerankModel != "rerank-2.5" {
+			t.Errorf("RerankModel = %q, want rerank-2.5 default", cfg.RerankModel)
+		}
+	})
+
+	t.Run("rerank voyage requires VOYAGE_API_KEY", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "test-secret")
+		t.Setenv("RERANK_PROVIDER", "voyage")
+		t.Setenv("VOYAGE_API_KEY", "")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected error without VOYAGE_API_KEY")
+		}
+		t.Setenv("VOYAGE_API_KEY", "vk")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.RerankProvider != "voyage" {
+			t.Errorf("RerankProvider = %q", cfg.RerankProvider)
+		}
+	})
+
+	t.Run("rejects unknown RERANK_PROVIDER", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("AUTH_SECRET", "test-secret")
+		t.Setenv("RERANK_PROVIDER", "quantum")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected error for unknown provider")
+		}
+	})
+
 	t.Run("rejects invalid MAX_UPLOAD_BYTES", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://x")
 		t.Setenv("AUTH_SECRET", "test-secret")

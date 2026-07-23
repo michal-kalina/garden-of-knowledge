@@ -38,6 +38,7 @@ type Anthropic struct {
 	HTTP    *http.Client
 }
 
+// compile-time check that *Anthropic implements Streamer
 var _ Streamer = (*Anthropic)(nil)
 
 func NewAnthropic(apiKey, model string) *Anthropic {

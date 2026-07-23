@@ -7,11 +7,11 @@ set, instead of eyeballing a handful of manual queries.
 
 1. Ingest the eval corpus — `README.md` and every file in `docs/adr/` — via
    the normal upload flow, logged in as a dedicated account (e.g.
-   `eval@yourdomain.test`). Using the project's own docs as the corpus keeps
+   `eval@gok.test`). Using the project's own docs as the corpus keeps
    the eval reproducible without exposing anyone's private documents.
 2. Make sure `VOYAGE_API_KEY` is set — running with the fake embedder
    produces a report, but the numbers measure nothing (see "Known findings").
-3. `make eval-retrieval EVAL_USER=eval@yourdomain.test`
+3. `make eval-retrieval EVAL_USER=eval@gok.test`
 
 This writes `docs/eval/results/latest.md` and prints the same report to
 stdout: an aggregate table (MRR, Recall@1/3/5/10) followed by a per-case
@@ -39,9 +39,34 @@ long as the source document's headings don't change. See
   (`contextLimit` in `internal/chat`) to the model — a relevant chunk
   retrieved at rank 8 might as well not exist.
 
-Answer-quality evaluation (LLM-as-judge) and a reranking experiment with
-before/after numbers are tracked for the next eval step; this one covers
-retrieval only.
+Answer-quality evaluation (LLM-as-judge) is tracked for a later step; this
+one covers retrieval, now including an optional reranking pass.
+
+## Reranking: before/after
+
+A Voyage cross-encoder (`rerank-2.5`) can rerank hybrid search's candidates
+before the top results are returned — see [ADR-0007](../adr/0007-reranking.md)
+for why (short version: Recall@1 was the weak spot in the baseline below,
+and that's exactly the failure mode a cross-encoder targets). It's off by
+default; turning it on and comparing against the baseline is a two-command
+before/after:
+
+```bash
+make eval-retrieval EVAL_USER=you@example.com            # baseline (already below)
+make eval-retrieval-reranked EVAL_USER=you@example.com    # same corpus, reranked
+```
+
+Both write to `docs/eval/results/` (`latest.md` / `latest-reranked.md`); diff
+them, or just compare the summary tables. Requires `VOYAGE_API_KEY`
+regardless of which embeddings provider is configured — reranking is a
+separate API call, billed separately from embeddings.
+
+**Numbers pending a real run**: I can't call `api.voyageai.com` from this
+sandbox (network egress is allowlisted to package registries only — see
+`internal/rerank/rerank_test.go` for the httptest-based unit tests that
+verify the client instead), so unlike the retrieval baseline below, the
+reranked comparison has to come from your own run. Paste the resulting
+`latest-reranked.md` back and I'll fold the real numbers into this section.
 
 ## Baseline
 
