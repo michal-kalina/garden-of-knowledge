@@ -35,6 +35,8 @@ type fixedOrder struct {
 	err   error
 }
 
+func (f fixedOrder) ModelName() string { return "fixed-order-fake" }
+
 func (f fixedOrder) Rerank(_ context.Context, _ string, documents []string, topK int) ([]rerank.Result, error) {
 	if f.err != nil {
 		return nil, f.err

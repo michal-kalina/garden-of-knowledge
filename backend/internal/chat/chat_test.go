@@ -27,6 +27,8 @@ type fakeLLM struct {
 	reply    string
 }
 
+func (f *fakeLLM) ModelName() string { return "fake-model" }
+
 func (f *fakeLLM) Stream(_ context.Context, system string, msgs []llm.Message, _ int,
 	onDelta func(string) error) (string, error) {
 	f.called = true

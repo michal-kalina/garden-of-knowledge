@@ -54,6 +54,8 @@ type voyageResponse struct {
 	} `json:"data"`
 }
 
+func (v *Voyage) ModelName() string { return v.Model }
+
 // Embed processes texts in provider-sized batches and returns vectors in the
 // same order as the input.
 func (v *Voyage) Embed(ctx context.Context, texts []string, input InputType) ([][]float32, error) {

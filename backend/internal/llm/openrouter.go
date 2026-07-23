@@ -67,6 +67,8 @@ type orChunk struct {
 	} `json:"error"`
 }
 
+func (o *OpenRouter) ModelName() string { return o.Model }
+
 func (o *OpenRouter) Stream(ctx context.Context, system string, msgs []Message, maxTokens int,
 	onDelta func(string) error) (string, error) {
 

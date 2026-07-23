@@ -48,6 +48,8 @@ type voyageRerankResponse struct {
 	} `json:"data"`
 }
 
+func (v *Voyage) ModelName() string { return v.Model }
+
 func (v *Voyage) Rerank(ctx context.Context, query string, documents []string, topK int) ([]Result, error) {
 	if len(documents) == 0 {
 		return nil, nil

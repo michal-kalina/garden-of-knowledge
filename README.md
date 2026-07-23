@@ -48,6 +48,8 @@ Every non-obvious choice is documented as an ADR in [`docs/adr/`](docs/adr/). Hi
 2. **Job queue in Postgres** (`SELECT … FOR UPDATE SKIP LOCKED`) instead of a message broker — transactional enqueue with the document insert, zero extra infrastructure.
 3. **A separate Python parser service** — Go owns the system, Python owns the one problem it is genuinely better at.
 
+Traces and estimated cost per query are exported over plain OTLP (see [ADR-0008](docs/adr/0008-observability.md)) — no vendor lock-in, just an environment variable. Setup guides for [Jaeger](docs/telemetry/jaeger.md), [Honeycomb](docs/telemetry/honeycomb.md), and [Langfuse](docs/telemetry/langfuse.md) are in [`docs/telemetry/`](docs/telemetry/).
+
 ## Repository layout
 
 ```
@@ -56,7 +58,7 @@ backend/    Go — API gateway (cmd/api) and ingestion worker (cmd/worker);
 parser/     Python — document parsing service (FastAPI + PyMuPDF)
 web/        Next.js frontend — upload, streaming chat, clickable citations
 deploy/     Kubernetes manifests (Phase 5)
-docs/       ADRs, roadmap
+docs/       ADRs, roadmap, telemetry setup guides
 ```
 
 ## Development

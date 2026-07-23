@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/rerank"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/retrieval"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/storage"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/telemetry"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/users"
 )
 
@@ -42,6 +44,20 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+
+	shutdownTelemetry, err := telemetry.Setup(ctx, "gok-api")
+	if err != nil {
+		return fmt.Errorf("setup telemetry: %w", err)
+	}
+	defer func() {
+		// Independent timeout: shutdown must not hang api termination if
+		// the collector is unreachable.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTelemetry(shutdownCtx); err != nil {
+			logger.Error("telemetry shutdown failed", "error", err)
+		}
+	}()
 
 	db, err := database.Open(ctx, cfg.DatabaseURL)
 	if err != nil {

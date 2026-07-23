@@ -30,6 +30,10 @@ import (
 	"fmt"
 	"sort"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/database"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/embeddings"
 )
@@ -91,11 +95,20 @@ func New(db *sql.DB, embedder embeddings.Embedder) *Searcher {
 	return &Searcher{db: db, embedder: embedder}
 }
 
+var tracer = otel.Tracer("gok/retrieval")
+
 // Search embeds the query, runs both retrievers over the user's documents
 // and fuses their rankings. Tenancy lives in SQL, not post-filtering: a
 // candidate list fetched globally and filtered afterwards could end up
 // empty for a user whose documents rank below others'.
 func (s *Searcher) Search(ctx context.Context, userID, query string, limit int) ([]Result, error) {
+	ctx, span := tracer.Start(ctx, "retrieval.search")
+	defer span.End()
+	span.SetAttributes(
+		attribute.Int("gok.query_chars", len(query)),
+		attribute.Int("gok.limit", limit),
+	)
+
 	if limit <= 0 {
 		limit = DefaultLimit
 	}
@@ -107,6 +120,8 @@ func (s *Searcher) Search(ctx context.Context, userID, query string, limit int) 
 	// projections for the two sides of retrieval.
 	vecs, err := s.embedder.Embed(ctx, []string{query}, embeddings.InputQuery)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "embed query failed")
 		return nil, fmt.Errorf("embed query: %w", err)
 	}
 
@@ -114,6 +129,8 @@ func (s *Searcher) Search(ctx context.Context, userID, query string, limit int) 
 
 	vectorRows, err := s.vectorSearch(ctx, userID, database.VectorLiteral(vecs[0]))
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "vector search failed")
 		return nil, fmt.Errorf("vector search: %w", err)
 	}
 	for rank, r := range vectorRows {
@@ -124,6 +141,8 @@ func (s *Searcher) Search(ctx context.Context, userID, query string, limit int) 
 
 	textRows, err := s.textSearch(ctx, userID, query)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "text search failed")
 		return nil, fmt.Errorf("text search: %w", err)
 	}
 	for rank, r := range textRows {
@@ -131,6 +150,10 @@ func (s *Searcher) Search(ctx context.Context, userID, query string, limit int) 
 		res.TextRank = rank + 1
 		res.Score += 1.0 / float64(rrfK+rank+1)
 	}
+	span.SetAttributes(
+		attribute.Int("gok.vector_hits", len(vectorRows)),
+		attribute.Int("gok.text_hits", len(textRows)),
+	)
 
 	fused := make([]Result, 0, len(byID))
 	for _, r := range byID {
@@ -145,6 +168,7 @@ func (s *Searcher) Search(ctx context.Context, userID, query string, limit int) 
 	if len(fused) > limit {
 		fused = fused[:limit]
 	}
+	span.SetAttributes(attribute.Int("gok.result_count", len(fused)))
 	return fused, nil
 }
 

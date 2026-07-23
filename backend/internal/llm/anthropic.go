@@ -28,6 +28,9 @@ type Streamer interface {
 	// as it arrives, returning the full concatenated response text.
 	Stream(ctx context.Context, system string, msgs []Message, maxTokens int,
 		onDelta func(text string) error) (string, error)
+	// ModelName names the model in use, for cost estimation and trace
+	// attributes — not used for behavior.
+	ModelName() string
 }
 
 // Anthropic calls the Anthropic Messages API.
@@ -73,6 +76,8 @@ type streamEvent struct {
 		Message string `json:"message"`
 	} `json:"error"`
 }
+
+func (a *Anthropic) ModelName() string { return a.Model }
 
 func (a *Anthropic) Stream(ctx context.Context, system string, msgs []Message, maxTokens int,
 	onDelta func(string) error) (string, error) {

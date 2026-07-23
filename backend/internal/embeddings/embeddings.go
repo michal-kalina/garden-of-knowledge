@@ -31,6 +31,10 @@ const (
 // Embedder converts a batch of texts into vectors, preserving order.
 type Embedder interface {
 	Embed(ctx context.Context, texts []string, input InputType) ([][]float32, error)
+	// Model names the model in use, for cost estimation and trace
+	// attributes (internal/cost, internal/telemetry) — not used for
+	// behavior.
+	ModelName() string
 }
 
 // Fake produces deterministic unit-length vectors derived from a hash of the
@@ -40,6 +44,8 @@ type Fake struct{}
 
 // compile-time check that Fake implements Embedder
 var _ Embedder = Fake{}
+
+func (Fake) ModelName() string { return "fake" }
 
 func (Fake) Embed(_ context.Context, texts []string, _ InputType) ([][]float32, error) {
 	out := make([][]float32, len(texts))

@@ -3,7 +3,7 @@
 // internal/embeddings which encode them separately. Cross-encoders are
 // slower (one inference per candidate, not a single vector lookup) but
 // measurably better at judging fine-grained relevance, which is exactly the
-// gap the Phase 4 baseline surfaced: retrieval finds the right
+// gap the Phase 4 Step 1 baseline surfaced: retrieval finds the right
 // *document* reliably (Recall@10 = 1.0) but not always the right *section*
 // of it first (Recall@1 = 0.556). See docs/adr/0007-reranking.md.
 package rerank
@@ -23,6 +23,9 @@ type Result struct {
 // descending relevance. topK <= 0 means "return all of them scored."
 type Reranker interface {
 	Rerank(ctx context.Context, query string, documents []string, topK int) ([]Result, error)
+	// ModelName names the model in use, for cost estimation and trace
+	// attributes — not used for behavior.
+	ModelName() string
 }
 
 // Fake preserves input order, assigning strictly decreasing scores. It
@@ -32,8 +35,9 @@ type Reranker interface {
 // not for testing rerank quality.
 type Fake struct{}
 
-// compile-time check that Fake implements Reranker
-var _ Reranker = Fake{}
+// compile-time check that Fake implements Rerankervar _ Reranker = Fake{}
+
+func (Fake) ModelName() string { return "fake" }
 
 func (Fake) Rerank(_ context.Context, _ string, documents []string, topK int) ([]Result, error) {
 	out := make([]Result, len(documents))

@@ -4,10 +4,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/chunking"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/config"
@@ -15,6 +17,7 @@ import (
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/embeddings"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/parserclient"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/storage"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/telemetry"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/worker"
 )
 
@@ -34,6 +37,18 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+
+	shutdownTelemetry, err := telemetry.Setup(ctx, "gok-worker")
+	if err != nil {
+		return fmt.Errorf("setup telemetry: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTelemetry(shutdownCtx); err != nil {
+			logger.Error("telemetry shutdown failed", "error", err)
+		}
+	}()
 
 	db, err := database.Open(ctx, cfg.DatabaseURL)
 	if err != nil {

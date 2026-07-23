@@ -15,7 +15,12 @@ import (
 	"log/slog"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/chunking"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/cost"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/database"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/embeddings"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/storage"
@@ -158,46 +163,102 @@ func (p *Processor) claim(ctx context.Context) (task, bool, error) {
 	return t, true, nil
 }
 
+var tracer = otel.Tracer("gok/worker")
+
 // process runs the pipeline for a claimed task and finalizes it.
 func (p *Processor) process(ctx context.Context, t task) error {
-	obj, err := p.Store.Get(ctx, t.storageKey)
+	ctx, span := tracer.Start(ctx, "worker.process_document")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("gok.document_id", t.docID),
+		attribute.String("gok.filename", t.filename),
+		attribute.Int("gok.attempt", t.attempts),
+	)
+
+	obj, err := func() (io.ReadCloser, error) {
+		_, span := tracer.Start(ctx, "worker.fetch")
+		defer span.End()
+		o, err := p.Store.Get(ctx, t.storageKey)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "fetch failed")
+		}
+		return o, err
+	}()
 	if err != nil {
 		return fmt.Errorf("fetch from storage: %w", err)
 	}
 	defer obj.Close()
 
-	blocks, err := p.Parser.Parse(ctx, t.filename, t.contentType, obj)
+	var blocks []chunking.Block
+	err = func() error {
+		parseCtx, span := tracer.Start(ctx, "worker.parse")
+		defer span.End()
+		b, err := p.Parser.Parse(parseCtx, t.filename, t.contentType, obj)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "parse failed")
+			return err
+		}
+		span.SetAttributes(attribute.Int("gok.block_count", len(b)))
+		blocks = b
+		return nil
+	}()
 	if err != nil {
 		return fmt.Errorf("parse: %w", err)
 	}
 
+	_, chunkSpan := tracer.Start(ctx, "worker.chunk")
 	chunks := p.Chunker.Chunk(blocks)
+	chunkSpan.SetAttributes(attribute.Int("gok.chunk_count", len(chunks)))
+	chunkSpan.End()
 
 	var vectors [][]float32
 	if len(chunks) > 0 {
+		embedCtx, span := tracer.Start(ctx, "worker.embed")
 		texts := make([]string, len(chunks))
+		approxTokens := 0
 		for i, c := range chunks {
 			texts[i] = c.Content
+			approxTokens += chunking.ApproxTokens(c.Content)
 		}
-		vectors, err = p.Embedder.Embed(ctx, texts, embeddings.InputDocument)
+		vectors, err = p.Embedder.Embed(embedCtx, texts, embeddings.InputDocument)
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "embed failed")
+			span.End()
 			return fmt.Errorf("embed: %w", err)
 		}
 		if len(vectors) != len(chunks) {
+			span.End()
 			return fmt.Errorf("embedder returned %d vectors for %d chunks", len(vectors), len(chunks))
 		}
+		model := p.Embedder.ModelName()
+		span.SetAttributes(
+			attribute.String("gok.model", model),
+			attribute.Int("gok.batch_size", len(chunks)),
+			attribute.Float64("gok.cost_usd_estimate", cost.EmbeddingUSD(model, approxTokens)),
+		)
+		span.End()
 	}
 
 	// Finalize in one transaction. The DELETE makes reprocessing idempotent:
 	// a retry (or stale-job takeover) can never leave duplicate chunks.
+	ctx, storeSpan := tracer.Start(ctx, "worker.store")
+	defer storeSpan.End()
+
 	tx, err := p.DB.BeginTx(ctx, nil)
 	if err != nil {
+		storeSpan.RecordError(err)
+		storeSpan.SetStatus(codes.Error, "begin tx failed")
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck // rollback after commit is a no-op
 
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM chunks WHERE document_id = $1`, t.docID); err != nil {
+		storeSpan.RecordError(err)
+		storeSpan.SetStatus(codes.Error, "clear chunks failed")
 		return fmt.Errorf("clear previous chunks: %w", err)
 	}
 
@@ -207,6 +268,8 @@ func (p *Processor) process(ctx context.Context, t task) error {
 			VALUES ($1, $2, $3, $4, $5, $6, $7::vector)
 		`, t.docID, i, c.Content, c.Heading, c.StartPage, c.EndPage,
 			database.VectorLiteral(vectors[i])); err != nil {
+			storeSpan.RecordError(err)
+			storeSpan.SetStatus(codes.Error, "insert chunk failed")
 			return fmt.Errorf("insert chunk %d: %w", i, err)
 		}
 	}

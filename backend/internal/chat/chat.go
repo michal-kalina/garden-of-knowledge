@@ -16,6 +16,12 @@ import (
 	"fmt"
 	"strings"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/chunking"
+	"github.com/michal-kalina/garden-of-knowledge/backend/internal/cost"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/llm"
 	"github.com/michal-kalina/garden-of-knowledge/backend/internal/retrieval"
 )
@@ -81,6 +87,8 @@ Rules:
 const noSourcesReply = "I could not find anything in the knowledge base related to this question. " +
 	"Try rephrasing it, or check whether the relevant documents have been uploaded and are marked ready."
 
+var tracer = otel.Tracer("gok/chat")
+
 // Ask runs the full flow and returns the complete answer text (identical to
 // what was streamed via onDelta) so the caller can persist it without
 // re-accumulating deltas itself. onSources fires once, before generation
@@ -90,8 +98,17 @@ const noSourcesReply = "I could not find anything in the knowledge base related 
 func (s *Service) Ask(ctx context.Context, userID, question string, history []Turn,
 	onSources func([]Source) error, onDelta func(string) error) (string, error) {
 
+	ctx, span := tracer.Start(ctx, "chat.ask")
+	defer span.End()
+	span.SetAttributes(
+		attribute.Int("gok.question_chars", len(question)),
+		attribute.Int("gok.history_turns", len(history)),
+	)
+
 	results, err := s.retriever.Search(ctx, userID, question, s.contextLimit)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "retrieve failed")
 		return "", fmt.Errorf("retrieve: %w", err)
 	}
 
@@ -108,6 +125,7 @@ func (s *Service) Ask(ctx context.Context, userID, question string, history []Tu
 			Content:    r.Content,
 		}
 	}
+	span.SetAttributes(attribute.Int("gok.source_count", len(sources)))
 	if err := onSources(sources); err != nil {
 		return "", err
 	}
@@ -123,12 +141,31 @@ func (s *Service) Ask(ctx context.Context, userID, question string, history []Tu
 	for _, t := range history {
 		messages = append(messages, llm.Message{Role: t.Role, Content: t.Content})
 	}
-	messages = append(messages, llm.Message{Role: "user", Content: buildUserPrompt(question, sources)})
+	userPrompt := buildUserPrompt(question, sources)
+	messages = append(messages, llm.Message{Role: "user", Content: userPrompt})
 
 	answer, err := s.llm.Stream(ctx, systemPrompt, messages, s.maxTokens, onDelta)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "generate failed")
 		return "", fmt.Errorf("generate: %w", err)
 	}
+
+	// Cost is estimated from our own token counting, not the provider's
+	// billed usage — see internal/cost's package doc for why (short
+	// version: wiring real usage requires extending Streamer, tracked as a
+	// follow-up). Directionally useful in a trace, not a billing ledger.
+	model := s.llm.ModelName()
+	inputTokens := chunking.ApproxTokens(systemPrompt) + chunking.ApproxTokens(userPrompt)
+	for _, t := range history {
+		inputTokens += chunking.ApproxTokens(t.Content)
+	}
+	outputTokens := chunking.ApproxTokens(answer)
+	span.SetAttributes(
+		attribute.String("gok.model", model),
+		attribute.Int("gok.answer_chars", len(answer)),
+		attribute.Float64("gok.cost_usd_estimate", cost.LLMUSD(model, inputTokens, outputTokens)),
+	)
 	return answer, nil
 }
 

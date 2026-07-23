@@ -23,6 +23,12 @@ docker-build:
 	docker build -t gok-parser ./parser
 	docker build -t gok-web ./web
 
+upgrade:
+	cd backend && go get -u ./...
+
+mod:
+	cd backend && go mod tidy
+
 # --- Tests ------------------------------------------------------------------
 
 test: test-backend test-parser
