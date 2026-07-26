@@ -1,0 +1,16 @@
+# Local Terraform state — see README.md "State" section for why this is
+# local rather than a remote backend, and why that means it must never be
+# committed (it contains resource IDs and, depending on the resource, can
+# contain sensitive attribute values in plain text).
+*.tfstate
+*.tfstate.*
+.terraform/
+# NOTE: .terraform.lock.hcl is intentionally NOT listed here — commit it.
+# It pins exact provider versions and checksums; ignoring it would let
+# `terraform init` silently pick up a newer provider on a fresh clone.
+
+# Contains your real IP and email; not secret, but no reason to publish it.
+terraform.tfvars
+
+# Fetched by outputs.fetch_kubeconfig_command — grants full cluster-admin.
+kubeconfig.yaml

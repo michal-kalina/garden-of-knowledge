@@ -38,5 +38,7 @@
 - [x] Reranking: Voyage cross-encoder behind a `Retriever`-shaped decorator (`retrieval.Reranked`), opt-in via `RERANK_PROVIDER`. Measured, real result: MRR/Recall@1 improved, Recall@3 regressed ("summary-chunk cannibalization"), Recall@5 (≈ chat's context window) unchanged — kept off by default. See [ADR-0007](docs/adr/0007-reranking.md) and [docs/eval/README.md](docs/eval/README.md).
 
 ## Phase 5 — Deployment
-- [ ] Kubernetes manifests / Helm chart, k3d walkthrough
+- [x] AWS infrastructure (Terraform): single EC2 host running k3s, default VPC (no NAT Gateway), Elastic IP, AWS Budgets alert — realistic cost ~$15-17/month vs. ~$165/month for a "textbook" EKS setup. See [ADR-0009](docs/adr/0009-aws-deployment.md) and `deploy/terraform/README.md`.
+- [ ] Kubernetes manifests for the application (Postgres+pgvector, MinIO, parser, api, worker, web, Ingress) — `deploy/k8s/`
+- [ ] Ephemeral EKS exercise (separate Terraform module, apply → demo → destroy) — proves real-EKS skill without the recurring cost
 - [ ] CI/CD image publishing
